@@ -6,6 +6,7 @@ build
 dist
 plugin_new
 MANIFEST
+venv/
 docutils
 genx.log
 doc/_*
