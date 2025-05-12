@@ -12,6 +12,14 @@ References
 If you use the program please give reference to the following publication:
 A. Glavic and M. Björck J. Appl. Cryst. 55, 1063-1071 (2022).
 
+Changes 3.7.11
+==============
+ * New context menu entry in grid that allows population with most commonly used parameters of a model.
+   Thanks to [Kibbi](https://github.com/kibbi10) for the PR #13
+ * Fix xmcd_moment model, regression from <3.7.0
+ * Fix dataclass handling in python >= 3.13.0
+ * Remove dependency for VTK in SXRD plugin
+
 Changes 3.7.10
 ==============
  * Add initial support for Bruker BRML file format.
