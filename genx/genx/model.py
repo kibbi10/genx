@@ -635,6 +635,7 @@ class Model(H5HintedExport):
         Create ORSO simple model representation of this model.
         """
         from orsopy.fileio import model_language as ml
+        from orsopy.fileio.base import ComplexValue
 
         sm = self.script_module
 
@@ -642,13 +643,13 @@ class Model(H5HintedExport):
             # use x-ray SLDs
             def get_material(li):
                 sld = complex(li.f * li.dens) * 1e-6
-                return ml.Material(sld=ml.ComplexValue(sld.real, sld.imag))
+                return ml.Material(sld=ComplexValue(sld.real, sld.imag))
 
         else:
             # use neutron SLDs
             def get_material(li):
                 sld = complex(li.b * li.dens) * 1e-6
-                return ml.Material(sld=ml.ComplexValue(sld.real, sld.imag))
+                return ml.Material(sld=ComplexValue(sld.real, sld.imag))
 
         def get_layer(li):
             return ml.Layer(thickness=li.d, material=get_material(li), roughness=li.sigma)
@@ -687,7 +688,7 @@ class Model(H5HintedExport):
             globals=defaults,
         )
 
-    def export_orso(self, basename):
+    def export_orso(self, basename, convert_to_q=True):
         """
         Export the data to files with basename filename. ORT output.
         The fileending will be .ort
@@ -741,9 +742,11 @@ class Model(H5HintedExport):
                 prev_columns_list = None
                 prev_columns = {}
             if hasattr(self.script_module, "inst") and self.script_module.inst.coords in ["tth", "2θ"]:
-                # this will probably need changing in the future as ORSO standard
-                # will probably require Qz for first column
-                column_names = [Column("TTh", "deg"), Column("R"), ErrorColumn("R")]
+                if convert_to_q:
+                    column_names = [Column("Qz", "1/angstrom"), Column("R"), ErrorColumn("R")]
+                    columns[0] = 4.*np.pi/self.script_module.inst.wavelength*np.sin(columns[0]/360.*np.pi)
+                else:
+                    column_names = [Column("TTh", "deg"), Column("R"), ErrorColumn("R")]
             else:
                 column_names = [Column("Qz", "1/angstrom"), Column("R"), ErrorColumn("R")]
             if "res" in di.extra_data:
@@ -767,10 +770,119 @@ class Model(H5HintedExport):
             #     if not key in ['analysis'] and isinstance(value, dict):
             #         header_obj._user_data[key] = DumpDict(value)
             ds.append(OrsoDataset(header_obj, np.array(columns).T))
+            ds_names = [di.info.data_set for di in ds]
+            for i, ni in enumerate(ds_names):
+                if ni in ds_names[:i]:
+                    j = 2
+                    while f'{ni} ({j})' in ds_names[:i]:
+                        j += 1
+                    ds_names[i] = f'{ni} ({j})'
+                    ds[i].info.data_set = ds_names[i]
         try:
             save_orso(ds, basename, data_separator="\n")
         except GenxIOError as e:
             raise GenxIOError(e.error_message, e.file)
+
+    def export_simple_model(self, filename, compact=False):
+        # make sure model is compiled and parameters are applied
+        self.simulate()
+
+        def get_name(obj):
+            for key, value in self.script_module.__dict__.items():
+                if value is obj:
+                    return key
+            else:
+                return None
+
+        from orsopy.fileio.model_language import SampleModel, SubStack, Layer, Material, ModelParameters
+        from orsopy.fileio import ComplexValue
+
+        def get_fomula(composition):
+            # creates a formula from a composition list making element numbers more beautiful
+            output = ''
+            for fi, ei in composition:
+                output += ei.title()
+                if fi==1.0:
+                    continue
+                elif fi==int(fi):
+                    output += str(int(fi))
+                else:
+                    output += str(fi)
+            return output
+
+        xray = self.script_module.inst.probe == 'x-ray'
+
+        def get_layer(layer):
+            if hasattr(layer.f, 'composition'):
+                material = Material(formula=get_fomula(layer.f.composition), number_density=layer.dens)
+            elif hasattr(layer.b, 'composition'):
+                material = Material(formula=get_fomula(layer.b.composition), number_density=layer.dens)
+            else:
+                if xray:
+                    sld = 1e-5*layer.f*layer.dens
+                else:
+                    sld = 1e-5*layer.b*layer.dens
+                material = Material(sld=ComplexValue(sld.real, sld.imag, unit='1/angstrom^2'))
+
+            return Layer(
+                thickness=layer.d,
+                roughness=layer.sigma,
+                material=material,
+                )
+
+        main_stack = []
+        sub_stacks = {}
+        layers = {}
+        globals = ModelParameters(length_unit='angstrom', number_density_unit='1/angstrom^3')
+
+        sample = self.script_module.sample
+        layers['Amb'] = get_layer(self.script_module.Amb)
+        layers['Amb'].thickness = None
+        layers['Amb'].roughness = None
+
+        for stack in reversed(sample.Stacks):
+            sn = get_name(stack)
+            main_stack.append(sn)
+            stack_layers = []
+
+            for layer in reversed(stack.Layers):
+                ln = get_name(layer)
+                layers[ln] = get_layer(layer)
+                stack_layers.append(ln)
+
+
+            sub_stacks[sn] = SubStack(
+                repetitions=stack.Repetitions,
+                stack=" | ".join(stack_layers)
+                )
+
+        layers['Sub'] = get_layer(self.script_module.Sub)
+        layers['Sub'].thickness = None
+
+        if not compact:
+            sample_model = SampleModel(
+                stack='Amb | '+" | ".join(main_stack)+' | Sub',
+                origin='GenX model export',
+                globals=globals,
+                sub_stacks=sub_stacks,
+                layers=layers,
+                )
+        else:
+            for i, si in enumerate(main_stack):
+                stack = sub_stacks[si]
+                if stack.repetitions>1:
+                    main_stack[i] = f"{stack.repetitions} ( {stack.stack} )"
+                else:
+                    main_stack[i] = stack.stack
+            sample_model = SampleModel(
+                stack='Amb | '+" | ".join(main_stack)+' | Sub',
+                origin='GenX model export',
+                globals=globals,
+                layers=layers,
+                )
+
+        with open(filename, 'w') as fh:
+            fh.write(sample_model.to_yaml())
 
     @staticmethod
     def update_orso_meta(datasets: DataList):
@@ -876,10 +988,10 @@ class Model(H5HintedExport):
         """
         par_dict = get_parameters(self.script_module, numeric_types_only=True)
         if len(par_dict) == 0:
-            par_dict = self.get_possible_set_functions()
+            par_dict = self.get_possible_set_functions(numeric_types_only=True)
         return par_dict
 
-    def get_possible_set_functions(self) -> dict:
+    def get_possible_set_functions(self, numeric_types_only=False) -> dict:
         """
         Returns all the parameters that can be fitted given by the old style of defining parameters GenX2.4.X
         """
@@ -940,6 +1052,11 @@ class Model(H5HintedExport):
                 if isinstance(obj, tuple_of_classes):
                     if obj.__class__.__name__ not in par_dict:
                         par_dict[obj.__class__.__name__] = {}
+                    # TODO: Collect just parameter names to get rid of set function nomenclature
+                    # if numeric_types_only and hasattr(obj, '_parameter_info'):
+                    #     parinfo = obj._parameter_info()
+                    #     par_dict[obj.__class__.__name__].__setitem__(name, [key for key, field in parinfo.items() if field.type is float])
+                    # else:
                     par_dict[obj.__class__.__name__].__setitem__(
                         name, [member for member in dir(obj) if member.startswith(self.opt.set_func)]
                     )
@@ -967,9 +1084,12 @@ class Model(H5HintedExport):
         # compile again to have a completely independent script module
         self.compile_script()
 
+        import bumps
         from bumps.fitproblem import FitProblem
-
-        return FitProblem(GenxCurve(self))
+        if bumps.__version__.startswith("0."):
+            return FitProblem(GenxCurve(self))
+        else:
+            return FitProblem([GenxCurve(self)])
 
     def asym_stderr(self, dream_fit):
         """
@@ -979,7 +1099,7 @@ class Model(H5HintedExport):
         """
         from bumps.dream.stats import var_stats
 
-        vstats = var_stats(dream_fit.state.draw(portion=dream_fit._trimmed))
+        vstats = var_stats(dream_fit.state.draw())
         return np.array([(v.p68[0] - v.best, v.p68[1] - v.best) for v in vstats], "d")
 
     def bumps_fit(
@@ -1000,6 +1120,7 @@ class Model(H5HintedExport):
         # create a fitter similar to the bumps.fitters.fit function but with option for GUI monitoring
         if monitors is None:
             monitors = []
+        import bumps
         from bumps.fitters import FIT_ACTIVE_IDS, FIT_AVAILABLE_IDS, FITTERS, FitDriver
 
         from genx.bumps_optimizer import BumpsResult
@@ -1015,9 +1136,12 @@ class Model(H5HintedExport):
 
         if problem is None:
             problem = self.bumps_problem()
-        problem.fitness.stop_fit = False
-        options["abort_test"] = lambda: problem.fitness.stop_fit
-
+        if bumps.__version__.startswith("0."):
+            problem.fitness.stop_fit = False
+            options["abort_test"] = lambda: problem.fitness.stop_fit
+        else:
+            problem.stop_fit = False
+            options["abort_test"] = lambda: problem.stop_fit
         # verbose = True
         if method not in FIT_AVAILABLE_IDS:
             raise ValueError("unknown method %r not one of %s" % (method, ", ".join(sorted(FIT_ACTIVE_IDS))))

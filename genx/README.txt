@@ -1,4 +1,4 @@
-This package contains GenX 3.7 a program to refine x-ray and neutron reflectivity as well as
+This package contains GenX 3.8 a program to refine x-ray and neutron reflectivity as well as
 surface x-ray diffraction using differential evolution. It can also serve as a general fitting program.
 
 Support
@@ -11,6 +11,85 @@ References
 ==========
 If you use the program please give reference to the following publication:
 A. Glavic and M. Björck J. Appl. Cryst. 55, 1063-1071 (2022).
+
+Changes 3.8.7
+=============
+ * Fix Mac OS file icons for genx and orso files
+ * Fix compatibility with bumps version 1.0.3
+ * Improve startup time to splash screen
+ * Fix mass density profile calculation if bw/fw instead of bc/fp data libraries were used
+ * Add tests for several example file types (please feel free to send me your example datasets as well)
+
+Changes 3.8.6
+=============
+ * Allow Mac OS GUI to open files directly as expected and add genx executable to PATH
+ * Implement Mac OS automatic update capability and remove previous version on install
+ * Improve Linux mime-type handling
+ * Update snap build environment
+
+Changes 3.8.5
+=============
+ * Fix a file missing from the last commit that would crash the program during startup
+
+Changes 3.8.4
+=============
+ * Add the option to keep only one instance of GenX GUI at a time (see Settings Menu)
+ * Fix bug where saving a model with Levenberg-Marquardt optimizer active would corrupt the file
+
+Changes 3.8.3
+=============
+ * Possibility to import and export the sample model from ORSO model language
+ * Export SLD always using single column spacers for compatibility with matlab
+ * Improve plugin loader resility when accountering an error
+
+Changes 3.8.2
+=============
+ * Change XRDML reader to keep angle instead of converting to Q
+ * Add option to convert all ORSO .ort output to Q as specified in the standart
+ * Fix SLD graph reporting magnetization components if model is not neutron spin-flip (#19)
+
+Changes 3.8.1
+=============
+ * Fix import issues with attenuation factors for XRDML (#20) and Bruker BRML file import
+ * Fix metadata sometime being overwritten when using multiple datasets
+ * Fix ORSO export error if two datasets would have the same name
+ * Fix Uncertainty profile that was broken due to changes from adding mass density
+
+Changes 3.8.0
+=============
+ * Add capability to SLD graph to show elemental and absolute mass density
+ * Improve Publication Graph dialog with more example code and SLD/mass density graphs
+ * Fix catching common errors when creating model from ORSO file header
+ * Fix error dialog could become too large to fit on screen
+ * Fix small bugs
+
+Changes 3.7.15
+==============
+ * Fix SimpleReflectivity error when seleccting a cell in the multilayer header part #
+ * Fix bumps parameter statistics window wrongly assigning results to parameters.
+ * Add 1d plot for the individual parameters shown in the statistics dialog graph.
+
+Changes 3.7.14
+==============
+ * Prevent help window from being shown off-screen when main window is on right edge of screen
+ * Fix crash in OSX build caused by missing threading library for numba
+ * Add option to show layer name and SLD as labels in LayerGraphics plugin.
+ * Add pyinstaller splash image on Windows build to show startup indication earlier
+
+Changes 3.7.13
+==============
+ * Remove old and buggy zoom facility and add standard matplotlib toolbar for each graph, instead.
+ * Update windows and Mac OS build environments, fixing issue with M1 package.
+
+Changes 3.7.12
+==============
+ * Add advanced resolution function describing Kalpha 1/2 wavelength for
+   high resolution measurements with oscillations up to larger reflection angles
+   (see new esample "X-ray_Reflecitvity_kalpha.hgx" on how to use it)
+ * Update orsopy integration for version >=1.2.2
+ * Implement compatibility for bumps version 1.x
+ * Fix XRDML intensity scaling when attenuation was used
+ * Fix some GUI bugs
 
 Changes 3.7.11
 ==============

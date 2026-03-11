@@ -12,7 +12,6 @@ a = Analysis(['scripts\\genx'],
              pathex=[os.path.abspath(os.path.curdir)],
              binaries=[(os.path.join(dll_path, 'libiomp5md.dll'), '.'),
                        (os.path.join(dll_path, 'mkl_*.dll'), '.'), # For CUDA toolkit
-                       (os.path.join(dll_path, 'svml_dispmd.dll'), '.'), # For CUDA toolkit
                        (os.path.join(dll_path, 'nvvm64*.dll'), 'DLLs'), # For CUDA toolkit
                        (os.path.join(dll_path, 'libdevice*'), 'DLLs'),
                        (os.path.join(dll_path, 'nvvm64*.dll'), 'Library/bin'),
@@ -39,8 +38,20 @@ a = Analysis(['scripts\\genx'],
              noarchive=False)
 pyz = PYZ(a.pure, a.zipped_data,
              cipher=block_cipher)
+splash = Splash(
+        "windows_build/genx_splash.png",
+        binaries=a.binaries,
+        datas=a.datas,
+        text_pos=(42, 456),
+        text_size=12,
+        text_color="black",
+        minify_script=True,
+        always_on_top=True,
+        text_default="Extracting GenX...",
+    )
 exe = EXE(pyz,
           a.scripts,
+          splash,
           [],
           exclude_binaries=True,
           name='genx',
@@ -64,6 +75,7 @@ coll = COLLECT(exe,
                a.binaries,
                a.zipfiles,
                a.datas,
+               splash.binaries,
                strip=False,
                upx=False,
                upx_exclude=[],

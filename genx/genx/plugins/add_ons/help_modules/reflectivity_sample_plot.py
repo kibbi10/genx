@@ -28,6 +28,7 @@ class SamplePlotConfig(BasePlotConfig):
     show_single_model: bool = False
     legend_outside: bool = False
 
+    use_mass_density: bool = False
     show_imag: bool = False
 
 
@@ -93,12 +94,16 @@ class SamplePlotPanel(PlotPanel):
 
         if self.plugin.sim_returns_sld and model._sim:
             # New style sim function with one sld for each simulation
-            self.plot_dicts = model.SLD
+            self.plot_dicts = list(model.SLD)
             for sim in range(len(self.plot_dicts)):
                 if data[sim].show:
-                    for key in self.plot_dicts[sim]:
+                    if self.opt.use_mass_density:
+                        sld_dict = self.plot_dicts[sim].get('Mass Density', {})
+                    else:
+                        sld_dict = self.plot_dicts[sim]
+                    for key in sld_dict:
                         try:
-                            if key in ["z", "SLD unit"] or (self.plot_dicts[0][key] == 0).all():
+                            if key in ["z", "SLD unit", "Mass Density"] or (sld_dict[key] == 0).all():
                                 # skip lines that are all zero to keep legend cleaner
                                 continue
                         except KeyError:
@@ -110,15 +115,15 @@ class SamplePlotPanel(PlotPanel):
                             else:
                                 label = data[sim].name + "\n" + key
                             self.ax.plot(
-                                self.plot_dicts[sim]["z"],
-                                self.plot_dicts[sim][key],
+                                sld_dict["z"],
+                                sld_dict[key],
                                 color=colors[sim][i % len(colors[sim])],
                                 label=label,
                             )
 
-                            if "SLD unit" in self.plot_dicts[sim]:
-                                if not self.plot_dicts[sim]["SLD unit"] in sld_units:
-                                    sld_units.append(self.plot_dicts[sim]["SLD unit"])
+                            if "SLD unit" in sld_dict:
+                                if not sld_dict["SLD unit"] in sld_units:
+                                    sld_units.append(sld_dict["SLD unit"])
                             i += 1
                 if self.opt.show_single_model:
                     break
@@ -133,7 +138,7 @@ class SamplePlotPanel(PlotPanel):
                 plot_dict = sample.SimSLD(None, None, model.inst)
                 self.plot_dicts = [plot_dict]
                 for key in self.plot_dicts[0]:
-                    if key in ["z", "SLD unit"] or (self.plot_dicts[0][key] == 0).all():
+                    if key in ["z", "SLD unit", "Mass Density"] or (self.plot_dicts[0][key] == 0).all():
                         # skip lines that are all zero to keep legend cleaner
                         continue
                     is_imag = key[:2] == "Im" or key[:4] == "imag"
@@ -157,7 +162,10 @@ class SamplePlotPanel(PlotPanel):
             else:
                 self.ax.legend(loc="upper right", framealpha=0.5, fontsize="small", ncol=1)
             sld_unit = ", ".join(sld_units)
-            self.ax.yaxis.label.set_text(r"$\mathrm{\mathsf{SLD\,[%s]}}$" % sld_unit)
+            if self.opt.use_mass_density:
+                self.ax.yaxis.label.set_text(r"$\mathrm{\mathsf{density\,[%s]}}$"%sld_unit)
+            else:
+                self.ax.yaxis.label.set_text(r"$\mathrm{\mathsf{SLD\,[%s]}}$" % sld_unit)
             self.ax.xaxis.label.set_text(r"$\mathrm{\mathsf{ z\,[\AA]}}$")
             wx.CallAfter(self.flush_plot)
             self.AutoScale()
@@ -179,9 +187,16 @@ class SamplePlotPanel(PlotPanel):
             save_array = np.array([self.plot_dicts[sim]["z"]])
             header = " z [Å]" + " " * 12
             for key in self.plot_dicts[sim]:
-                if key != "z" and key != "SLD unit":
+                if key == "Mass Density":
+                    continue
+                if key not in ["z", "SLD unit"]:
                     save_array = np.r_[save_array, [self.plot_dicts[sim][key]]]
                     header += f" {key:19s}"
+            for key in self.plot_dicts[sim].get("Mass Density", {}):
+                if key not in ["z", "SLD unit"]:
+                    save_array = np.r_[save_array, [self.plot_dicts[sim]["Mass Density"][key]]]
+                    header += f" MD_{key:16s}"
+
             with open(new_filename, "w", encoding="utf-8") as f:
                 f.write("# File exported from GenX's Reflectivity plugin\n")
                 f.write("# File created: %s\n" % time.ctime())
@@ -191,9 +206,12 @@ class SamplePlotPanel(PlotPanel):
                     sld_unit = sld_unit.replace("10^{-6}\\AA^{-2}", "10⁻⁶ Å⁻²")
                     sld_unit = sld_unit.replace("r_{e}/\\AA^{3}", "rₑ/Å⁻³")
                     f.write("# SLD unit: %s\n" % sld_unit)
+                if "SLD unit" in self.plot_dicts[sim].get("Mass Density", {}):
+                    sld_unit = self.plot_dicts[sim]["Mass Density"]["SLD unit"]
+                    f.write("# Mass Density (MD) unit: %s\n" % sld_unit)
                 f.write("# Coumns: \n")
                 f.write("#" + header + "\n")
-                np.savetxt(f, save_array.T, fmt="%-19.12e")
+                np.savetxt(f, save_array.T, fmt="%.13e")
 
     def generate_sld_distribution(self, reference_interface=0, number_sample=1000):
         """
@@ -214,7 +232,7 @@ class SamplePlotPanel(PlotPanel):
         zmin = 1e6
         zmax = -1e6
         for SLDi in initial_SLDs:
-            data.append(dict([(key, []) for key in SLDi if key not in ["z", "SLD unit"]]))
+            data.append(dict([(key, []) for key in SLDi if key not in ["z", "SLD unit", "Mass Density"]]))
             zmin = min(SLDi["z"].min(), zmin)
             zmax = max(SLDi["z"].max(), zmax)
         # create a general z-range for all simulations
@@ -244,7 +262,7 @@ class SamplePlotPanel(PlotPanel):
                     SLDi["z"] -= h[reference_interface]
 
                 for key, value in SLDi.items():
-                    if key in ["z", "SLD unit"]:
+                    if key in ["z", "SLD unit", "Mass Density"]:
                         continue
                     zfun = interp1d(
                         SLDi["z"], value, fill_value=(value[0], value[-1]), bounds_error=False, kind="linear"
@@ -402,7 +420,7 @@ class SamplePlotPanel(PlotPanel):
                     f.write("# SLD unit: %s\n" % sld_unit)
                 f.write("# Coumns: \n")
                 f.write("#" + header + "\n")
-                np.savetxt(f, save_array.T, fmt="%-19.12e")
+                np.savetxt(f, save_array.T, fmt="%.13e")
         if do_plot:
             self.PlotConfidence(plot_data=plot_data)
 

@@ -35,7 +35,7 @@ from .. import add_on_framework as framework
 from .help_modules import reflectivity_images as images
 from .help_modules.custom_dialog import *
 from .help_modules.materials_db import MASS_DENSITY_CONVERSION, Formula, mdb
-from .help_modules.reflectivity_gui import ReflClassHelpDialog
+from .help_modules.reflectivity_gui import ReflClassHelpDialog, ORSOExportDialogHook
 from .help_modules.reflectivity_sample_plot import SamplePlotPanel
 from .help_modules.reflectivity_utils import find_code_segment
 
@@ -128,6 +128,9 @@ class SampleGrid(gridlib.Grid):
         self._activated_ctrl = False
 
     def onCellSelected(self, evt):
+        if evt.Row==self.parent.sample_table.repeatedInfo() and evt.Col!=10:
+            # prevent selection of header text cells
+            return
         if evt.Col in [1]:
             self._activated_ctrl = True
             wx.CallAfter(self.EnableCellEditControl)
@@ -496,12 +499,8 @@ class SampleTable(gridlib.GridTableBase):
             if col == 0:
                 attr.SetSize(1, 8)
                 attr.SetAlignment(wx.ALIGN_CENTER, wx.ALIGN_BOTTOM)
-                return attr
-            if col == 8:
+            elif col == 8:
                 attr.SetSize(1, 2)
-                return attr
-            if col == 10:
-                return attr
             return attr
         row = self.realRow(row)
 
@@ -1414,6 +1413,15 @@ class Plugin(framework.Template):
 
         # Create a menu for handling the plugin
         menu = self.NewMenu("Reflec")
+        self.mb_import_sample = wx.MenuItem(
+            menu, wx.NewId(), "Import Sample...", "Import a sample model from ORSO yaml format", wx.ITEM_NORMAL
+        )
+        menu.Append(self.mb_import_sample)
+        self.mb_export_sample = wx.MenuItem(
+            menu, wx.NewId(), "Export Sample...", "Export the sample model to ORSO yaml format", wx.ITEM_NORMAL
+        )
+        menu.Append(self.mb_export_sample)
+        menu.AppendSeparator()
         self.mb_export_sld = wx.MenuItem(
             menu, wx.NewId(), "Export SLD...", "Export the SLD to a ASCII file", wx.ITEM_NORMAL
         )
@@ -1422,7 +1430,12 @@ class Plugin(framework.Template):
             menu, wx.NewId(), "Show Im SLD", "Toggles showing the imaginary part of the SLD", wx.ITEM_CHECK
         )
         menu.Append(self.mb_show_imag_sld)
+        self.mb_use_mass_density = wx.MenuItem(
+            menu, wx.NewId(), "Mass Density", "Toggles using mass density instead of SLD", wx.ITEM_CHECK
+        )
+        menu.Append(self.mb_use_mass_density)
         self.mb_show_imag_sld.Check(self.sld_plot.opt.show_imag)
+        self.mb_use_mass_density.Check(self.sld_plot.opt.use_mass_density)
         self.mb_autoupdate_sim = parent.mb_checkables[custom_ids.MenuId.AUTO_SIM]
         self.mb_autoupdate_sim.Check(True)
         self.mb_autoupdate_sld = wx.MenuItem(
@@ -1452,9 +1465,12 @@ class Plugin(framework.Template):
             self.OnNewModel(None)
 
         # self.mb_autoupdate_sld.SetCheckable(True)
+        self.parent.Bind(wx.EVT_MENU, self.OnImportSample, self.mb_import_sample)
+        self.parent.Bind(wx.EVT_MENU, self.OnExportSample, self.mb_export_sample)
         self.parent.Bind(wx.EVT_MENU, self.OnExportSLD, self.mb_export_sld)
         self.parent.Bind(wx.EVT_MENU, self.OnAutoUpdateSLD, self.mb_autoupdate_sld)
         self.parent.Bind(wx.EVT_MENU, self.OnShowImagSLD, self.mb_show_imag_sld)
+        self.parent.Bind(wx.EVT_MENU, self.OnShowMassDensity, self.mb_use_mass_density)
         self.parent.Bind(wx.EVT_MENU, self.OnHideAdvanced, self.mb_hide_advanced)
 
         self.DisableGrid()
@@ -1523,6 +1539,47 @@ class Plugin(framework.Template):
         self.sld_plot.opt.show_imag = self.mb_show_imag_sld.IsChecked()
         self.sld_plot.WriteConfig()
         self.sld_plot.Plot()
+
+    def OnShowMassDensity(self, evt):
+        self.sld_plot.opt.use_mass_density = self.mb_use_mass_density.IsChecked()
+        self.sld_plot.WriteConfig()
+        self.sld_plot.Plot()
+
+    def OnImportSample(self, evt):
+        dlg = wx.FileDialog(
+            self.parent,
+            message="Import Sample Model from ...",
+            defaultFile="",
+            wildcard="ORSO model (*.yml/*.yaml/*.ort/*.orb)|*.yml;*.yaml;*.ort;*.orb",
+            style=wx.FD_OPEN | wx.FD_CHANGE_DIR,
+        )
+        if dlg.ShowModal() == wx.ID_OK:
+            fname = dlg.GetPath()
+            self.parent.replace_sample_model(fname)
+
+    def OnExportSample(self, evt):
+        dlg = wx.FileDialog(
+            self.parent,
+            message="Export Sample Model to ...",
+            defaultFile="",
+            wildcard="ORSO model (*.yml/*.yaml)|*.yml;*.yaml",
+            style=wx.FD_SAVE | wx.FD_CHANGE_DIR,
+        )
+        customizeHook = ORSOExportDialogHook()
+        dlg.SetCustomizeHook(customizeHook)
+
+        if dlg.ShowModal() == wx.ID_OK:
+            fname = dlg.GetPath()
+            if not (fname.endswith(".yml") or fname.endswith(".yaml")):
+                fname = fname+'.yaml'
+            result = True
+            if os.path.exists(fname):
+                filepath, filename = os.path.split(fname)
+                result = self.ShowQuestionDialog(
+                    "The file %s already exists." " Do" " you wish to overwrite it?" % filename
+                )
+            if result:
+                self.GetModel().export_simple_model(fname, compact=customizeHook.export_compact)
 
     def OnExportSLD(self, evt):
         dlg = wx.FileDialog(
@@ -1620,7 +1677,7 @@ class Plugin(framework.Template):
 
     def OnDataChanged(self, event):
         """Take into account changes in data.."""
-        self.sample_widget.UpdateModel()
+        self.sample_widget.UpdateModel(re_color=True)
 
     def OnOpenModel(self, event):
         """

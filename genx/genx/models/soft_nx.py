@@ -59,7 +59,7 @@ class Layer(refl.ReflBase):
        The neutron magnetic scattering length density in 1e-6 1/AA^2
     ``magn_ang``
        The angle of the magnetic moment in degress. 0 degrees correspond to
-       a moment collinear with the neutron spin.
+       a moment collinear with the neutron spin. Only used if probe is neutron spin-flip.
     """
 
     sigma: float = 0.0
@@ -427,7 +427,7 @@ def SLD_calculations(z, item, sample: Sample, inst: Instrument):
             + sld_m[-1]
         )
         rho_nucl = (rho_p + rho_m) / 2.0
-        if (magn_ang != 0.0).any():
+        if inst.probe == Probe.npolsf and (magn_ang != 0.0).any():
             rho_mag_x = (
                 sum(
                     (mag_sld_x[:-1] - mag_sld_x[1:]) * (0.5 - 0.5 * erf((z[:, newaxis] - int_pos) / sqrt(2.0) / sigma)),
@@ -648,9 +648,9 @@ class TestSoftNX(ModelTestCase):
 
     def test_sld(self):
         sample = Sample(
-            Stacks=[Stack(Layers=[Layer(d=150, sigma=2.0, f=2e-5 + 1e-7j, b=3e-6, dens=0.1, magn=0.1, magn_ang=24.0)])],
-            Ambient=Layer(b=1e-7, dens=0.1),
-            Substrate=Layer(b=4e-6, dens=0.1),
+            Stacks=[Stack(Layers=[Layer(d=150, sigma=2.0, sld_x=2e-5 + 1e-7j, sld_n=3e-6, sld_m=1e-6, magn_ang=24.0)])],
+            Ambient=Layer(sld_n=1e-7),
+            Substrate=Layer(sld_n=4e-6),
         )
         instrument = Instrument(
             probe=Probe.xray,

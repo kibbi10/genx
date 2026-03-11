@@ -12,9 +12,22 @@ from threading import Thread
 from typing import Dict
 
 import numpy as np
+import bumps
 
 from bumps.dream.stats import var_stats
-from bumps.fitproblem import BaseFitProblem, FitProblem, nllf_scale
+if bumps.__version__.startswith("0."):
+    from bumps.fitproblem import BaseFitProblem, FitProblem, nllf_scale
+elif tuple(bumps.__version__.split('.'))<('1','0','3'):
+    from bumps.parameter import unique
+    from bumps.fitproblem import FitProblem, nllf_scale
+else:
+    # Adapt to changed signature of nllf_scale function
+    from bumps.parameter import unique
+    from bumps.fitproblem import FitProblem, nllf_scale as _nllf_scale
+    def nllf_scale(problem, norm=True):
+        dof = problem.dof if norm else 1
+        npars = max(len(problem.getp()), 1)
+        return _nllf_scale(dof, npars, norm=norm)
 from bumps.fitters import FITTERS, FitDriver
 from bumps.formatnum import format_uncertainty
 from bumps.monitor import TimedUpdate
@@ -253,7 +266,10 @@ class BumpsOptimizer(GenxOptimizer):
         self.n_dim = len(param_funcs)
         self.start_guess = start_guess
         self.best_vec = start_guess
-        self.bproblem: BaseFitProblem = self.model.bumps_problem()
+        if bumps.__version__.startswith("0."):
+            self.bproblem: BaseFitProblem = self.model.bumps_problem()
+        else:
+            self.bproblem: FitProblem = self.model.bumps_problem()
         self.last_result = None
 
     def calc_sim(self, vec):
@@ -314,10 +330,20 @@ class BumpsOptimizer(GenxOptimizer):
         options["xtol"] = self.opt.xtol
 
         problem = self.bproblem
-        problem.fitness.stop_fit = False
-        options["abort_test"] = lambda: problem.fitness.stop_fit
-        pnames = list(problem.model_parameters().keys())
-        mnames = problem.labels()
+
+        if bumps.__version__.startswith("0."):
+            problem.fitness.stop_fit = False
+            options["abort_test"] = lambda: problem.fitness.stop_fit
+            pnames = list(problem.model_parameters().keys())
+            mnames = problem.labels()
+        else:
+            problem.stop_fit = False
+            options["abort_test"] = lambda: problem.stop_fit
+            # this assumes that there is only one model in the problem
+            model = next(problem.models)
+            pnames = list(model.parameters().keys())
+            mnames = problem.labels()
+
         self._map_indices = dict(((i, pnames.index(ni)) for i, ni in enumerate(mnames)))
 
         fitclass = None
@@ -382,14 +408,20 @@ class BumpsOptimizer(GenxOptimizer):
         self.covar = self.covar_bumps2genx(cov)
 
         self.plot_output()
-        self._callbacks.fitting_ended(self.get_result_info(interrupted=problem.fitness.stop_fit))
+        if bumps.__version__.startswith("0."):
+            self._callbacks.fitting_ended(self.get_result_info(interrupted=problem.fitness.stop_fit))
+        else:
+            self._callbacks.fitting_ended(self.get_result_info(interrupted=problem.stop_fit))
         self._running = False
 
     def stop_fit(self):
         if self.bproblem is None:
             return
         self._stop_fit = True
-        self.bproblem.fitness.stop_fit = True
+        if bumps.__version__.startswith("0."):
+            self.bproblem.fitness.stop_fit = True
+        else:
+            self.bproblem.stop_fit = True
         self._thread.join(1.0)
 
     def resume_fit(self, model: Model):

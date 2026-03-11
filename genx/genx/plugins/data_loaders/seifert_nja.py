@@ -34,7 +34,7 @@ class Plugin(Template):
         with open(file_path, "r", encoding="utf-8") as fh:
             l1 = fh.readline()
             l2 = fh.readline()
-        return l2.startswith("#ScanTableParameter")
+        return l2.startswith("#ScanTableParameter") or l1.startswith('#MeasParameter')
 
     def evaluate_header(self, header):
         output = {}
@@ -107,7 +107,7 @@ class Plugin(Template):
 
             # insert metadata into ORSO compatible fields
             dataset.meta["data_source"]["facility"] = "Seifert nja loader"
-            dataset.meta["data_source"]["experiment"]["probe"] = "xray"
+            dataset.meta["data_source"]["experiment"]["probe"] = "x-ray"
             dataset.meta["data_source"]["measurement"]["scheme"] = "angle-dispersive"
             # header evaluations
             inst = dataset.meta["data_source"]["measurement"]["instrument_settings"]

@@ -105,7 +105,7 @@ class Layer(refl.ReflBase):
         The magnetic moment per formula unit (same formula unit as b and dens refer to)
     ``magn_ang``
         The angle of the magnetic moment in degress. 0 degrees correspond to
-        a moment collinear with the neutron spin.
+        a moment collinear with the neutron spin. Only used if probe is neutron spin-flip.
     """
 
     d: float = 0.0
@@ -749,7 +749,7 @@ def SLD_calculations(z, item, sample: Sample, inst: Instrument):
             + sld_m[-1]
         )
         rho_nucl = (rho_p + rho_m) / 2.0
-        if (magn_ang != 0.0).any():
+        if inst.probe == Probe.npolsf and (magn_ang != 0.0).any():
             rho_mag_x = (
                 sum(
                     (mag_sld_x[:-1] - mag_sld_x[1:]) * (0.5 - 0.5 * erf((z[:, newaxis] - int_pos) / sqrt(2.0) / sigma)),
@@ -782,6 +782,7 @@ def SLD_calculations(z, item, sample: Sample, inst: Instrument):
                 "SLD unit": sld_unit,
             }
     if item is None or item == "all":
+        dic['Mass Density'] = MassDensity(z, item, sample)
         return dic
     else:
         try:
@@ -789,6 +790,44 @@ def SLD_calculations(z, item, sample: Sample, inst: Instrument):
         except:
             raise ValueError("The chosen item, %s, does not exist" % item)
 
+def MassDensity(z, item, sample: Sample):
+    """
+    Assuming all f-values are defined via Elements, calculate elemental and total mass density.
+    """
+    from .utils import __w_dict__
+
+    parameters = sample.resolveLayerParameters()
+    dens = array(parameters.dens, dtype=float32)
+    mdens_by_element = {}
+    for i, di in enumerate(dens):
+        for number, element in getattr(parameters.f[i], 'composition', getattr(parameters.b[i], 'composition', ())):
+            if element not in mdens_by_element:
+                mdens_by_element[element] = [0. for j in range(i)]
+            mdens_by_element[element].append(number*dens[i]*__w_dict__[element]*1.66053907)
+        for element in mdens_by_element:
+            if len(mdens_by_element[element])<=i:
+                mdens_by_element[element].append(0.)
+
+    d = array(parameters.d, dtype=float64)
+    d = d[1:-1]
+    int_pos = cumsum(r_[0, d])
+    sigma = array(parameters.sigma, dtype=float64)[:-1] + 1e-7
+    if z is None:
+        z = arange(-sigma[0] * 5, int_pos.max() + sigma[-1] * 5, 0.5)
+
+    dic = {'z': z, 'SLD unit': 'g/cm³', 'Sum': 0.*z}
+    for element in mdens_by_element:
+        mdele = array(mdens_by_element[element])
+        rho_ele = sum((mdele[:-1] - mdele[1:]) * (0.5 - 0.5 * erf((z[:, newaxis] - int_pos) / sqrt(2.0) / sigma)), 1) + mdele[-1]
+        dic[element.capitalize()] = rho_ele
+        dic['Sum']+=dic[element.capitalize()]
+    if item is None or item == "all":
+        return dic
+    else:
+        try:
+            return dic[item]
+        except:
+            raise ValueError("The chosen item, %s, does not exist" % item)
 
 POL_CHANNELS = [Polarization.up_up, Polarization.up_down, Polarization.down_up, Polarization.down_down]
 

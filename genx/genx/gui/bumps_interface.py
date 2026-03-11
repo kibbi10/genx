@@ -4,16 +4,25 @@ Classes to interface with the bumps module for fitting and statistical analysis.
 
 import threading
 
+import bumps
 import wx
 
 from bumps import __version__ as bumps_version
 from bumps.dream.corrplot import _hists
-from bumps.fitproblem import nllf_scale
+if tuple(bumps_version.split('.'))<('1','0','3'):
+    from bumps.fitproblem import nllf_scale
+else:
+    # Adapt to changed signature of nllf_scale function
+    from bumps.fitproblem import nllf_scale as _nllf_scale
+    def nllf_scale(problem, norm=True):
+        dof = problem.dof if norm else 1
+        npars = max(len(problem.getp()), 1)
+        return _nllf_scale(dof, npars, norm=norm)
 from bumps.formatnum import format_uncertainty
 from bumps.monitor import TimedUpdate
 from matplotlib.colors import LogNorm
-from numpy import array, maximum, newaxis, sqrt
-from wx.grid import EVT_GRID_CELL_LEFT_DCLICK, Grid
+from numpy import array, maximum, newaxis, sqrt, linspace
+from wx.grid import EVT_GRID_CELL_LEFT_DCLICK
 
 from ..bumps_optimizer import BumpsResult
 from ..plugins.utils import ShowInfoDialog
@@ -223,11 +232,20 @@ class StatisticalAnalysisDialog(wx.Dialog):
     def OnRunAnalysis(self, event):
         if self.thread is not None:
             self.run_button.SetLabel("Run Analysis...")
-            self.bproblem.fitness.stop_fit = True
+            if bumps.__version__.startswith("0."):
+                self.bproblem.fitness.stop_fit = True
+            else:
+                self.bproblem.stop_fit = True
             return
         self.thread = threading.Thread(target=self.run_bumps)
         self.thread.start()
         self.run_button.SetLabel("Stop Run")
+
+    def get_bumps_param_names(self):
+        if bumps.__version__.startswith("0."):
+            return list(self.bproblem.model_parameters().keys())
+        else:
+            return list(self.bproblem.model_parameters()['models'][0].keys())
 
     def run_bumps(self):
         self.bproblem = self.model.bumps_problem()
@@ -235,7 +253,7 @@ class StatisticalAnalysisDialog(wx.Dialog):
         pop = self.entries["pop"].GetValue()
         burn = self.entries["burn"].GetValue()
         samples = self.entries["samples"].GetValue()
-        self.pbar.SetRange(int(samples / (len(self.bproblem.model_parameters()) * pop)) + burn)
+        self.pbar.SetRange(int(samples / (len(self.get_bumps_param_names()) * pop)) + burn)
 
         with CatchModelError(self, "bumps_modeling") as mgr:
             res = self.model.bumps_fit(
@@ -271,7 +289,7 @@ class StatisticalAnalysisDialog(wx.Dialog):
 
         self.fom_text.SetLabel("FOM chi²/bars: %.3f" % self.chisq)
         self.draw = res.state.draw()
-        pnames = list(self.bproblem.model_parameters().keys())
+        pnames = self.get_bumps_param_names()
         sort_indices = [pnames.index(ni) for ni in self.draw.labels]
 
         self.abs_cov = res.cov
@@ -312,16 +330,10 @@ class StatisticalAnalysisDialog(wx.Dialog):
                 if i != j and abs(cj) > rel_max[2]:
                     rel_max = [min(i, j), max(i, j), abs(cj)]
         self.hists = _hists(self.draw.points.T, bins=50)
+        self.grid.SelectBlock(sort_indices[rel_max[0]]+2, sort_indices[rel_max[1]],
+                              sort_indices[rel_max[0]]+2, sort_indices[rel_max[1]], addToSelected=False)
 
-        fig = self.plot_panel.figure
-        fig.clear()
-        ax = fig.add_subplot(111)
-        data, x, y = self.hists[(rel_max[0], rel_max[1])]
-        vmin, vmax = data[data > 0].min(), data.max()
-        ax.pcolorfast(y, x, maximum(vmin, data), norm=LogNorm(vmin, vmax), cmap="inferno")
-        ax.set_xlabel(self.draw.labels[rel_max[1]])
-        ax.set_ylabel(self.draw.labels[rel_max[0]])
-        self.plot_panel.flush_plot()
+        self.plot_histogram(rel_max[0], rel_max[1])
 
         # add analysis data to model for later storage in export header
         exdict = {}
@@ -370,7 +382,7 @@ class StatisticalAnalysisDialog(wx.Dialog):
             if self.chicorrect_checkbox.IsChecked():
                 display_cov = display_cov * self.chisq
             fmt = "%.4g"
-        pnames = list(self.bproblem.model_parameters().keys())
+        pnames = self.get_bumps_param_names()
         sort_indices = [pnames.index(ni) for ni in self.draw.labels]
         for i, ci in enumerate(self.rel_cov):
             for j, cj in enumerate(ci):
@@ -384,7 +396,7 @@ class StatisticalAnalysisDialog(wx.Dialog):
             scl = sqrt(self.chisq)
         else:
             scl = 1.0
-        pnames = list(self.bproblem.model_parameters().keys())
+        pnames = self.get_bumps_param_names()
         sort_indices = [pnames.index(ni) for ni in self.draw.labels]
         res = self._res
         for i, dxi in enumerate(res.dx):
@@ -411,7 +423,7 @@ class StatisticalAnalysisDialog(wx.Dialog):
 
     def OnSelectCell(self, evt):
         ri, rj = evt.GetCol(), evt.GetRow() - 2
-        pnames = list(self.bproblem.model_parameters().keys())
+        pnames = self.get_bumps_param_names()
         reverse_indices = [self.draw.labels.index(ni) for ni in pnames]
         i = reverse_indices[ri]
         j = reverse_indices[rj]
@@ -422,12 +434,23 @@ class StatisticalAnalysisDialog(wx.Dialog):
             i = j
             j = itmp
 
+        self.plot_histogram(i, j)
+
+    def plot_histogram(self, i, j):
         fig = self.plot_panel.figure
         fig.clear()
         ax = fig.add_subplot(111)
         data, x, y = self.hists[(i, j)]
-        vmin, vmax = data[data > 0].min(), data.max()
+        vmin, vmax = data[data>0].min(), data.max()
         ax.pcolorfast(y, x, maximum(vmin, data), norm=LogNorm(vmin, vmax), cmap="inferno")
+        p1 = data.sum(axis=1)
+        p1 = 0.5*p1/p1.max()*(y[-1]-y[0])+y[0]
+        p1x = (x[:-1]+x[1:])/2.
+        p2 = data.sum(axis=0)
+        p2 = 0.5*p2/p2.max()*(x[-1]-x[0])+x[0]
+        p2y = (y[:-1]+y[1:])/2.
+        ax.plot(p1, p1x, color='blue')
+        ax.plot(p2y, p2, color='blue')
         ax.set_xlabel(self.draw.labels[j])
         ax.set_ylabel(self.draw.labels[i])
         self.plot_panel.flush_plot()
@@ -436,6 +459,9 @@ class StatisticalAnalysisDialog(wx.Dialog):
         if self.thread is not None and self.thread.is_alive():
             # a running bumps simulation can't be interrupted from other thread, stop window from closing
             self.ptxt.SetLabel("Simulation running")
-            self.bproblem.fitness.stop_fit = True
+            if bumps.__version__.startswith("0."):
+                self.bproblem.fitness.stop_fit = True
+            else:
+                self.bproblem.stop_fit = True
             self.thread.join(timeout=5.0)
         event.Skip()

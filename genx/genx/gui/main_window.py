@@ -31,14 +31,9 @@ from ..core.colors import COLOR_CYCLES
 from ..core.custom_logging import iprint, numpy_set_options
 from ..plugins import add_on_framework as add_on
 from ..version import __version__ as program_version
-from . import custom_ids, datalist, help
-from . import images as img
-from . import parametergrid, pubgraph_dialog, solvergui
-from .batch_dialog import BatchDialog
 from .custom_events import *
-from .exception_handling import CatchModelError, GuiExceptionHandler
-from .message_dialogs import ShowNotificationDialog, ShowQuestionDialog
-from .online_update import VersionInfoDialog, check_version
+from . import images as img
+
 
 _path = os.path.dirname(__file__)
 if _path[-4:] == ".zip":
@@ -49,7 +44,7 @@ config_path = os.path.abspath(platformdirs.user_data_dir("GenX3", "ArturGlavic")
 profile_dest = os.path.abspath(os.path.join(config_path, "profiles"))
 profile_src = os.path.abspath(os.path.join(_path, "..", "profiles"))
 info(
-    f"Paths are:\n        config_path={config_path}\n       profile_dest={profile_dest}\n        profile_src{profile_src}"
+    f"Paths are:\n        config_path={config_path}\n       profile_dest={profile_dest}\n        profile_src={profile_src}"
 )
 version_file = os.path.join(config_path, "genx.version")
 if not os.path.exists(config_path):
@@ -90,6 +85,7 @@ class GUIConfig(conf_mod.BaseConfig):
     solver_update_time: float = 1.5
     editor: str = None
     last_update_check: float = 0.0
+    single_instance: bool = False
 
 
 @dataclass
@@ -100,9 +96,24 @@ class WindowStartup(conf_mod.BaseConfig):
     wx_plotting: bool = False
 
 
+class ORSOFileDialogHook(wx.FileDialogCustomizeHook):
+    convert_to_q = True
+
+    def __init__(self):
+        super().__init__()
+
+    def AddCustomControls(self, customizer):
+        self.checkbox = customizer.AddCheckBox("Convert TTH to Q\n(ORSO specification)")
+        self.checkbox.SetValue(self.convert_to_q)
+
+    def TransferDataFromCustomControls(self):
+        self.convert_to_q = self.checkbox.GetValue()
+
+
 class GenxMainWindow(wx.Frame, conf_mod.Configurable):
     opt: GUIConfig
     script_file: str = None
+    single_instance_server = None
 
     def __init__(self, parent: wx.App, dpi_overwrite=None):
         self._init_phase = True
@@ -281,11 +292,15 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
 
         # Initializations..
         # To force an update of the menubar...
-        self.plot_data.SetZoom(False)
+        # self.plot_data.SetZoom(False)
 
         with self.catch_error(action="init", step=f"reading plot config"):
             for p in [self.plot_data, self.plot_fom, self.plot_pars, self.plot_fomscan]:
                 p.ReadConfig()
+
+        self.mb_checkables[custom_ids.MenuId.SET_SINGLE].Check(self.opt.single_instance)
+        if self.opt.single_instance:
+            self.single_instance_activate()
 
         debug("finished setup of MainFrame")
 
@@ -325,7 +340,7 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         mb_file.Append(wx.ID_ANY, "Export", mb_export, "")
         mb_file.AppendSeparator()
         mb_print = wx.Menu()
-        mb_print.Append(
+        mb_file.Append(
             custom_ids.MenuId.PUBLISH_PLOT, "Publish Plot...\tCtrl+Shift+P", "Generate publication quality graph"
         )
         mb_print.Append(custom_ids.MenuId.PRINT_PLOT, "Print Plot...\tCtrl+P", "Print the current plot")
@@ -390,13 +405,13 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         )
         mb_view.Append(wx.ID_ANY, "Auto Color", mb_view_colors, "")
         mb_view.AppendSeparator()
-        self.mb_checkables[custom_ids.MenuId.ZOOM] = mb_view.Append(
-            custom_ids.MenuId.ZOOM, "Zoom\tCtrl+Z", "Turn the zoom on/off", wx.ITEM_CHECK
-        )
-        mb_view.Append(custom_ids.MenuId.ZOOM_ALL, "Zoom All\tCtrl+Shift+Z", "Zoom to fit all data points")
-        self.mb_checkables[custom_ids.MenuId.AUTO_SCALE] = mb_view.Append(
-            custom_ids.MenuId.AUTO_SCALE, "Autoscale", "Sets autoscale on when plotting", wx.ITEM_CHECK
-        )
+        # self.mb_checkables[custom_ids.MenuId.ZOOM] = mb_view.Append(
+        #     custom_ids.MenuId.ZOOM, "Zoom\tCtrl+Z", "Turn the zoom on/off", wx.ITEM_CHECK
+        # )
+        # mb_view.Append(custom_ids.MenuId.ZOOM_ALL, "Zoom All\tCtrl+Shift+Z", "Zoom to fit all data points")
+        # self.mb_checkables[custom_ids.MenuId.AUTO_SCALE] = mb_view.Append(
+        #     custom_ids.MenuId.AUTO_SCALE, "Autoscale", "Sets autoscale on when plotting", wx.ITEM_CHECK
+        # )
         self.mb_checkables[custom_ids.MenuId.USE_TOGGLE_SHOW] = mb_view.Append(
             custom_ids.MenuId.USE_TOGGLE_SHOW,
             "Use Toggle Show",
@@ -460,6 +475,13 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         mb_set.AppendSeparator()
         mb_set.Append(custom_ids.MenuId.SET_PROFILE, "Startup Profile...", "")
         mb_set.Append(custom_ids.MenuId.SET_EDITOR, "Select External Editor...", "")
+        self.mb_checkables[custom_ids.MenuId.SET_SINGLE] = mb_set.Append(
+            custom_ids.MenuId.SET_SINGLE,
+            "Single Instance",
+            "Keep only one instance of GenX, subsequent calls raise the window and load a given file",
+            wx.ITEM_CHECK,
+        )
+
         mfmb.Append(mb_set, "Settings")
         help_menu = wx.Menu()
         help_menu.Append(custom_ids.MenuId.HELP_MODEL, "Models Help...", "Show help for the models")
@@ -520,15 +542,15 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         self.Bind(wx.EVT_MENU, self.eh_data_toggle_error, id=custom_ids.MenuId.TOGGLE_ERROR)
         self.Bind(wx.EVT_MENU, self.eh_data_calc, id=custom_ids.MenuId.CALCS_DATA)
         self.Bind(wx.EVT_MENU, self.eh_mb_view_grid_slider, id=custom_ids.MenuId.TOGGLE_SLIDER)
-        self.Bind(wx.EVT_MENU, self.eh_mb_view_zoom, id=custom_ids.MenuId.ZOOM)
-        self.Bind(wx.EVT_MENU, self.eh_mb_view_zoomall, id=custom_ids.MenuId.ZOOM_ALL)
+        # self.Bind(wx.EVT_MENU, self.eh_mb_view_zoom, id=custom_ids.MenuId.ZOOM)
+        # self.Bind(wx.EVT_MENU, self.eh_mb_view_zoomall, id=custom_ids.MenuId.ZOOM_ALL)
         for key in COLOR_CYCLES.keys():
             self.Bind(wx.EVT_MENU, self.eh_mb_view_color_cycle, id=self.mb_checkables[key].GetId())
         self.Bind(wx.EVT_MENU, self.eh_mb_view_yscale_log, id=custom_ids.MenuId.Y_SCALE_LOG)
         self.Bind(wx.EVT_MENU, self.eh_mb_view_yscale_linear, id=custom_ids.MenuId.Y_SCALE_LIN)
         self.Bind(wx.EVT_MENU, self.eh_mb_view_xscale_log, id=custom_ids.MenuId.X_SCALE_LOG)
         self.Bind(wx.EVT_MENU, self.eh_mb_view_xscale_linear, id=custom_ids.MenuId.X_SCALE_LOG)
-        self.Bind(wx.EVT_MENU, self.eh_mb_view_autoscale, id=custom_ids.MenuId.AUTO_SCALE)
+        # self.Bind(wx.EVT_MENU, self.eh_mb_view_autoscale, id=custom_ids.MenuId.AUTO_SCALE)
         self.Bind(wx.EVT_MENU, self.eh_mb_view_use_toggle_show, id=custom_ids.MenuId.USE_TOGGLE_SHOW)
         self.Bind(wx.EVT_MENU, self.eh_tb_simulate, id=custom_ids.MenuId.SIM_MODEL)
         self.Bind(wx.EVT_MENU, self.eh_mb_fit_evaluate, id=custom_ids.MenuId.EVAL_MODEL)
@@ -544,6 +566,7 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         self.Bind(wx.EVT_MENU, self.eh_data_plots, id=custom_ids.MenuId.SET_PLOT)
         self.Bind(wx.EVT_MENU, self.eh_show_startup_dialog, id=custom_ids.MenuId.SET_PROFILE)
         self.Bind(wx.EVT_MENU, self.eh_mb_select_editor, id=custom_ids.MenuId.SET_EDITOR)
+        self.Bind(wx.EVT_MENU, self.eh_on_toggle_single_instance, id=custom_ids.MenuId.SET_SINGLE)
         self.Bind(wx.EVT_MENU, self.eh_mb_models_help, id=custom_ids.MenuId.HELP_MODEL)
         self.Bind(wx.EVT_MENU, self.eh_mb_fom_help, id=custom_ids.MenuId.HELP_FOM)
         self.Bind(wx.EVT_MENU, self.eh_mb_plugins_help, id=custom_ids.MenuId.HELP_PLUGINS)
@@ -659,16 +682,16 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
             "Error Statistics",
             "Error Statistics",
         )
-        self.main_frame_toolbar.AddSeparator()
-        self.main_frame_toolbar.AddTool(
-            custom_ids.ToolId.ZOOM,
-            "tb_zoom",
-            wx.Bitmap(img.getzoomImage().Scale(tb_bmp_size, tb_bmp_size)),
-            wx.NullBitmap,
-            wx.ITEM_CHECK,
-            "Zoom | Ctrl+Z",
-            "Turn zoom on/off  | Ctrl+Z",
-        )
+        # self.main_frame_toolbar.AddSeparator()
+        # self.main_frame_toolbar.AddTool(
+        #     custom_ids.ToolId.ZOOM,
+        #     "tb_zoom",
+        #     wx.Bitmap(img.getzoomImage().Scale(tb_bmp_size, tb_bmp_size)),
+        #     wx.NullBitmap,
+        #     wx.ITEM_CHECK,
+        #     "Zoom | Ctrl+Z",
+        #     "Turn zoom on/off  | Ctrl+Z",
+        # )
 
     def bind_toolbar(self):
         self.Bind(wx.EVT_TOOL, self.eh_tb_new, id=custom_ids.ToolId.NEW_MODEL)
@@ -682,7 +705,7 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         self.Bind(wx.EVT_TOOL, self.eh_tb_restart_fit, id=custom_ids.ToolId.RESTART_FIT)
         self.Bind(wx.EVT_TOOL, self.eh_tb_calc_error_bars, id=custom_ids.ToolId.CALC_ERROR)
         self.Bind(wx.EVT_TOOL, self.eh_tb_error_stats, id=custom_ids.ToolId.ERROR_STATS)
-        self.Bind(wx.EVT_TOOL, self.eh_tb_zoom, id=custom_ids.ToolId.ZOOM)
+        # self.Bind(wx.EVT_TOOL, self.eh_tb_zoom, id=custom_ids.ToolId.ZOOM)
 
     def OnInputPageChanged(self, evt):
         tpage, fpage = evt.GetSelection(), evt.GetOldSelection()
@@ -694,7 +717,7 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
 
     def scan_parameter(self, row):
         """
-        Scans the parameter in row row [int] from max to min in the number
+        Scans the parameter in row [int] from max to min in the number
         of steps given by dialog input.
         """
         self.model_control.compile_if_needed()
@@ -714,6 +737,44 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
                 self.sep_plot_notebook.SetSelection(3)
 
         dlg.Destroy()
+
+    def eh_on_toggle_single_instance(self, evnt):
+        if self.mb_checkables[custom_ids.MenuId.SET_SINGLE].IsChecked():
+            self.single_instance_activate()
+            self.opt.single_instance = True
+        else:
+            self.single_isntance_deactivate()
+            self.opt.single_instance = False
+
+    def single_instance_activate(self):
+        with self.catch_error(action="single_instance_activate", step=f"activating single instance mode"):
+            if self.single_instance_server is not None:
+                return
+            from .single_instance import SingleInstanceServer
+            self.single_instance_server = SingleInstanceServer(on_message=self.single_instance_callback)
+            self.single_instance_server.start()
+
+    def single_isntance_deactivate(self):
+        with self.catch_error(action="single_instance_activate", step=f"deactivating single instance mode"):
+            self.single_instance_server.stop()
+            self.single_instance_server = None
+
+    def single_instance_callback(self, message: List[str]):
+        self.Iconize(False)
+        self.SetFocus()
+        self.Raise()
+        if len(message)>0:
+            if not self.model_control.saved:
+                ans = ShowQuestionDialog(
+                    self, "If you continue any changes in your model will not be saved.","Model not saved"
+                    )
+                if not ans:
+                    return
+
+            if message[0].endswith(".ort"):
+                wx.CallAfter(self.new_from_file, message)
+            else:
+                wx.CallAfter(self.open_model, message[0])
 
     def __set_properties(self):
         self.main_frame_fom_text = wx.StaticText(
@@ -1078,23 +1139,26 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         meta = deepcopy(self.data_list.data_cont.data[0].meta)
         ana_meta = meta.get("analysis", {})
         if ana_meta.get("software", {}).get("name", "") == "GenX":
-            self.model_control.set_model_script(ana_meta["script"])
-            params = ana_meta["parameters"]
-            pdata = [[pi["Parameter"], pi["Value"], pi["Fit"], pi["Min"], pi["Max"], pi["Error"]] for pi in params]
-            self.model_control.get_model_params().data = pdata
-            self.paramter_grid.table.UpdateView()
-            for di in self.data_list.data_cont.data:
-                del di.meta["analysis"]
+            with self.catch_error(action="extract_model", step=f"Extract stored GenX model") as mng:
+                self.model_control.set_model_script(ana_meta["script"])
+                params = ana_meta["parameters"]
+                pdata = [[pi["Parameter"], pi["Value"], pi["Fit"], pi["Min"], pi["Max"], pi["Error"]] for pi in params]
+                self.model_control.get_model_params().data = pdata
+                self.paramter_grid.table.UpdateView()
+                for di in self.data_list.data_cont.data:
+                    del di.meta["analysis"]
         else:
             from genx.plugins.data_loaders.help_modules.orso_analyzer import OrsoHeaderAnalyzer
 
-            header_analyzed = OrsoHeaderAnalyzer(meta)
-
-            from ..plugins.add_ons.SimpleReflectivity import Plugin as SRPlugin
+            with self.catch_error(action="analyze_metatdata", step=f"Using OrsoHeader to build model") as mng:
+                header_analyzed = OrsoHeaderAnalyzer(meta)
 
             if "SimpleReflectivity" in self.plugin_control.plugin_handler.loaded_plugins:
+                from ..plugins.add_ons.SimpleReflectivity import Plugin as SRPlugin
+
                 refl: SRPlugin = self.plugin_control.GetPlugin("SimpleReflectivity")
-                header_analyzed.build_simple_model(refl)
+                with self.catch_error(action="build_model", step=f"Building new model from metadata") as mng:
+                    header_analyzed.build_simple_model(refl)
             else:
                 from ..plugins.add_ons.Reflectivity import Plugin as ReflPlugin
 
@@ -1102,13 +1166,57 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
                     self.plugin_control.plugin_handler.load_plugin("Reflectivity")
                 # create a new script with the reflectivity plugin
                 refl: ReflPlugin = self.plugin_control.GetPlugin("Reflectivity")
-                header_analyzed.build_reflectivity(refl)
+
+                with self.catch_error(action="build_model", step=f"Building new model from metadata") as mng:
+                    header_analyzed.build_reflectivity(refl)
 
         with self.catch_error(action="open_model", step=f"processing plugins"):
             self.plugin_control.OnOpenModel(None)
         debug("open_model: post new model event")
         _post_new_model_event(self, self.model_control.get_model())
         self.update_title()
+
+    def apply_sample_model(self, header_analyzed):
+        if "SimpleReflectivity" in self.plugin_control.plugin_handler.loaded_plugins:
+            from ..plugins.add_ons.SimpleReflectivity import Plugin as SRPlugin
+
+            refl: SRPlugin = self.plugin_control.GetPlugin("SimpleReflectivity")
+            with self.catch_error(action="build_model", step=f"Building new model from metadata") as mng:
+                header_analyzed.build_simple_sample(refl)
+        else:
+            from ..plugins.add_ons.Reflectivity import Plugin as ReflPlugin
+
+            if not "Reflectivity" in self.plugin_control.plugin_handler.loaded_plugins:
+                self.plugin_control.plugin_handler.load_plugin("Reflectivity")
+            # create a new script with the reflectivity plugin
+            refl: ReflPlugin = self.plugin_control.GetPlugin("Reflectivity")
+
+            with self.catch_error(action="build_model", step=f"Building new model from metadata") as mng:
+                header_analyzed.build_sample(refl)
+
+    def replace_sample_model(self, path):
+        debug("replace_sample_model: extract ORSO model")
+        from genx.plugins.data_loaders.help_modules.orso_analyzer import OrsoHeaderAnalyzer
+
+        if path.endswith('.ort'):
+            from orsopy.fileio import load_orso
+            with self.catch_error(action="load_file", step=f"Extracint header information from ORSO file"):
+                ds0 = load_orso(path)[0]
+            with self.catch_error(action="analyze_metatdata", step=f"Using ModelLanguage to build model") as mng:
+                header_analyzed = OrsoHeaderAnalyzer.from_orso(ds0.info)
+        elif path.endswith('.orb'):
+            from orsopy.fileio import load_nexus
+            with self.catch_error(action="load_file", step=f"Extracint header information from ORSO file"):
+                ds0 = load_nexus(path)[0]
+            with self.catch_error(action="analyze_metatdata", step=f"Using ModelLanguage to build model") as mng:
+                header_analyzed = OrsoHeaderAnalyzer.from_orso(ds0.info)
+        else:
+            with self.catch_error(action="analyze_metatdata", step=f"Using ModelLanguage to build model") as mng:
+                yaml_data = open(path, 'r').read()
+                header_analyzed = OrsoHeaderAnalyzer.from_yaml(yaml_data)
+
+        if mng.successful:
+            self.apply_sample_model(header_analyzed)
 
     def open_model(self, path):
         debug("open_model: clear model")
@@ -1457,10 +1565,12 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
                 self.update_title()
 
     def eh_mb_publish_plot(self, event):
+        script_module = self.model_control.get_model()
         dia = pubgraph_dialog.PublicationDialog(
             self,
             data=self.model_control.get_data(),
-            module=self.model_control.get_model().eval_in_model('globals().get("model")'),
+            module=script_module.eval_in_model('globals().get("model")'),
+            SLD=script_module.eval_in_model('globals().get("SLD", [])'),
         )
         dia.ShowModal()
 
@@ -1492,10 +1602,13 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
             wildcard="ORSO Text File (*.ort)|*.ort",
             style=wx.FD_SAVE | wx.FD_CHANGE_DIR,
         )
+        customizeHook = ORSOFileDialogHook()
+        dlg.SetCustomizeHook(customizeHook)
+
         if dlg.ShowModal() == wx.ID_OK:
             path = dlg.GetPath()
             with self.catch_error(action="export_orso", step=f"export file {os.path.basename(path)}"):
-                self.model_control.export_orso(path)
+                self.model_control.export_orso(path, convert_to_q=customizeHook.convert_to_q)
         dlg.Destroy()
 
     def eh_mb_export_data(self, event):
@@ -1604,6 +1717,10 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         if self.script_file:
             os.remove(self.script_file)
             self.script_file = None
+
+        if self.single_instance_server:
+            self.single_instance_server.stop()
+            self.single_instance_server = None
 
         self.Destroy()
 
@@ -1743,6 +1860,13 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
             useful += "PyMySQL: %s, " % pymysql.__version__
         except ImportError:
             missing += "pymysql, "
+        try:
+            # noinspection PyUnresolvedReferences
+            import svgwrite
+
+            useful += "SVGwrite: %s, " % svgwrite.__version__
+        except ImportError:
+            missing += "svgwrite, "
 
         info_dilog = wx.adv.AboutDialogInfo()
         info_dilog.SetName("GenX")
@@ -1975,8 +2099,8 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         Callback for the settings change event for the current plot
          - change the toggle for the zoom icon and change the menu items.
         """
-        self.main_frame_toolbar.ToggleTool(custom_ids.ToolId.ZOOM, event.zoomstate)
-        self.mb_checkables[custom_ids.MenuId.ZOOM].Check(event.zoomstate)
+        # self.main_frame_toolbar.ToggleTool(custom_ids.ToolId.ZOOM, event.zoomstate)
+        # self.mb_checkables[custom_ids.MenuId.ZOOM].Check(event.zoomstate)
         if event.yscale == "log":
             self.mb_checkables[custom_ids.MenuId.Y_SCALE_LOG].Check(True)
         elif event.yscale == "linear":
@@ -1985,7 +2109,7 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
             self.mb_checkables[custom_ids.MenuId.X_SCALE_LOG].Check(True)
         elif event.xscale == "linear":
             self.mb_checkables[custom_ids.MenuId.X_SCALE_LIN].Check(True)
-        self.mb_checkables[custom_ids.MenuId.AUTO_SCALE].Check(event.autoscale)
+        # self.mb_checkables[custom_ids.MenuId.AUTO_SCALE].Check(event.autoscale)
 
     def eh_tb_calc_error_bars(self, event):
         """
@@ -2014,16 +2138,11 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         """plot_page_changed(frame, event) --> None
 
         Callback for page change in plot notebook. Changes the state of
-        the zoom toggle button.
+        the toggles.
         """
         sel = event.GetSelection()
         pages = self.get_pages()
         if sel < len(pages):
-            zoom_state = pages[sel].GetZoom()
-            # Set the zoom button to the correct value
-            self.main_frame_toolbar.ToggleTool(custom_ids.ToolId.ZOOM, zoom_state)
-            self.mb_checkables[custom_ids.MenuId.ZOOM].Check(zoom_state)
-
             yscale = pages[sel].GetYScale()
             if yscale == "log":
                 self.mb_checkables[custom_ids.MenuId.Y_SCALE_LOG].Check(True)
@@ -2389,6 +2508,16 @@ class GenxFileDropTarget(wx.FileDropTarget):
                     return False
             self.parent.new_from_file(filenames)
             return True
+        if model_file.lower().endswith(".yaml") or model_file.lower().endswith(".yml"):
+            # Check so the model is saved before quitting
+            if not self.parent.model_control.saved:
+                ans = ShowQuestionDialog(
+                    self.parent, "Do you want to replace your sample model from ORSO model language?", "Replace Sample"
+                )
+                if not ans:
+                    return False
+            self.parent.replace_sample_model(model_file)
+            return True
         return False
 
 
@@ -2408,6 +2537,8 @@ class GenxApp(wx.App):
         """
         Create a custom logging handler that opens a message dialog on critical (unhandled) exceptions.
         """
+        global CatchModelError, GuiExceptionHandler
+        from .exception_handling import CatchModelError, GuiExceptionHandler
         self._exception_handler = GuiExceptionHandler(self)
         logging.getLogger().addHandler(self._exception_handler)
 
@@ -2416,6 +2547,12 @@ class GenxApp(wx.App):
         image = wx.Bitmap(img.getgenxImage().Scale(400, 400))
         self.splash = wx.adv.SplashScreen(image, wx.adv.SPLASH_CENTER_ON_SCREEN, wx.adv.SPLASH_NO_TIMEOUT, None)
         wx.YieldIfNeeded()
+        try:
+            # if pyinstaller with splash, close it now
+            import pyi_splash
+            pyi_splash.close()
+        except ImportError:
+            pass
 
     def WriteSplash(self, text, progress=0.0):
         image = self.splash.GetBitmap()
@@ -2441,17 +2578,29 @@ class GenxApp(wx.App):
         gc.DrawText(txt, (w - tw) // 2, 0)
         dc.SelectObject(wx.NullBitmap)
 
+    def lazy_imoprts(self):
+        global custom_ids, datalist, help, parametergrid, pubgraph_dialog, solvergui, BatchDialog, \
+            ShowNotificationDialog, ShowQuestionDialog, VersionInfoDialog, check_version
+        from . import custom_ids, datalist, help
+        from . import parametergrid, pubgraph_dialog, solvergui
+        from .batch_dialog import BatchDialog
+        from .message_dialogs import ShowNotificationDialog, ShowQuestionDialog
+        from .online_update import VersionInfoDialog, check_version
+
     def OnInit(self):
         first_init = self._first_init
         if first_init:
             locale = wx.Locale(wx.LANGUAGE_ENGLISH_US)
             self.locale = locale
             self._first_init = False
-        self.ConnectExceptionHandler()
         self.ShowSplash()
+        self.ConnectExceptionHandler()
+        self.WriteSplash("loading genx UI modules...")
+        self.lazy_imoprts()
+
         debug("entering init phase")
 
-        self.WriteSplash("initializeing main window...")
+        self.WriteSplash("initializeing main window...", progress=0.15)
         main_frame = GenxMainWindow(self, dpi_overwrite=self.dpi_overwrite)
         self.SetTopWindow(main_frame)
         main_frame.SetMinSize(wx.Size(600, 400))
@@ -2481,8 +2630,8 @@ class GenxApp(wx.App):
                     def __call__(self, *args, **opts):
                         if inspect.stack()[1][3] != "<lambda>":
                             self.WriteSplash(
-                                f"compiling numba functions {self.update_counter}/21",
-                                progress=0.25 + 0.5 * (self.update_counter - 1) / 21.0,
+                                f"compiling numba functions {self.update_counter}/22",
+                                progress=0.25 + 0.5 * (self.update_counter - 1) / 22.0,
                             )
                             self.update_counter += 1
                             wx.YieldIfNeeded()
@@ -2538,6 +2687,15 @@ class GenxApp(wx.App):
         import sys
 
         subprocess.Popen([sys.executable, "-m", "genx.run"])
+
+    def MacOpenFiles(self, fileNames):
+        debug(f'Received new files to open {fileNames}')
+        main_frame = self.GetTopWindow()
+        if fileNames[0].endswith(".ort"):
+            wx.CallAfter(main_frame.plugin_control.LoadDefaultPlugins)
+            wx.CallAfter(main_frame.new_from_file, fileNames)
+        else:
+            wx.CallAfter(main_frame.open_model, fileNames[0])
 
 
 class StartUpConfigDialog(wx.Dialog):

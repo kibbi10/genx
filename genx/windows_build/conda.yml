@@ -1,6 +1,5 @@
 name: genx
 channels:
-  - defaults
   - conda-forge
 dependencies:
   - python=3.12
@@ -18,7 +17,7 @@ dependencies:
   - pyinstaller
   - requests
   - pint
-  - bumps
+  - bumps<1.0.3
   - svgwrite
   - orsopy
   - docutils

@@ -222,7 +222,10 @@ class Database(object):
             return stored_values[name]
         else:
             try:
-                stored_values[name] = object.__getattribute__(self, "lookup_value")(name)
+                res = object.__getattribute__(self, "lookup_value")(name)
+                if type(res) is complex:
+                    res = ElementComplex(res, name)
+                stored_values[name] = res
             except (LookupError, IOError) as e:
                 raise LookupError("The name %s does not exist in the" "database" % name)
             return stored_values[name]
@@ -253,13 +256,44 @@ class Database(object):
 
 
 # ==============================================================================
+class ElementComplex(complex):
+    def __new__(cls, value, element):
+        instance = super().__new__(cls, value)
+        instance.composition = ((1.0, element),)
+        return instance
+
+    def __mul__(self, other):
+        output = super().__mul__(other)
+        if type(other) in [float, int]:
+            output = super().__new__(ElementComplex, output)
+            output.composition = tuple((value*other, element) for value, element in self.composition)
+        return output
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
+    def __truediv__(self, other):
+        output = super().__mul__(other)
+        if type(other) in [float, int]:
+            output = super().__new__(ElementComplex, output)
+            output.composition = tuple((value/other, element) for value, element in self.composition)
+        return output
+
+    def __add__(self, other):
+        output = super().__add__(other)
+        if type(other) is ElementComplex:
+            output = super().__new__(ElementComplex, output)
+            output.composition = self.composition + other.composition
+        return output
+
+
 class FormFactor(Database):
     """A database for the x-ray formfactor which includes the
     anomulous part as well as the angle dependent part. The object will
     return a function of sin(theta)/lambda
     """
 
-    def __init__(self, wavelength, f_calc):
+    def __init__(self, wavelength, f_calc, weights=None):
         """__init__(self, wavelength, f_calc) --> None
 
         wavelength [float] the wavelength of the radiation in AA, f_calc a
@@ -268,6 +302,7 @@ class FormFactor(Database):
         Database.__init__(self)
         object.__setattr__(self, "wavelength", wavelength)
         object.__setattr__(self, "f_calc", f_calc)
+        object.__setattr__(self, "_weights", weights)
 
     def set_wavelength(self, wavelength):
         """set_wavelength(self, wavelength) --> None
@@ -285,8 +320,7 @@ class FormFactor(Database):
             #    change_proxyobject(stored_vals[key], f)
             # Removing a bug with proxy adding does not work properly
             for key in stored_vals:
-                f = object.__getattribute__(self, "lookup_value")(key)
-                stored_vals[key] = f
+                stored_vals[key] = object.__getattribute__(self, "lookup_value")(key)
 
     def __getattribute__(self, name):
         """__getattribute__(self, name) --> value
@@ -304,10 +338,16 @@ class FormFactor(Database):
 
         looks up a value in the external database
         """
+        weights = object.__getattribute__(self, "_weights")
         wl = object.__getattribute__(self, "wavelength")
         # f = Proxy((object.__getattribute__(self, 'f_calc')(name, wl)))
         # Removing a bug with proxy adding does not work properly
         f = object.__getattribute__(self, "f_calc")(name, wl)
+        if isinstance(f, complex):
+            if weights is None:
+                f = ElementComplex(f, name)
+            elif name in weights:
+                f = ElementComplex(f, name)*(0.6022141/weights[name])
         return f
 
 
@@ -324,7 +364,26 @@ class ScatteringLength(Database):
         values is a dictonary of key value pairs that are used in the database.
         """
         Database.__init__(self)
-        object.__setattr__(self, "stored_values", values)
+        ele_vals = {}
+        for key, value in values.items():
+            if type(value) in [float, complex]:
+                ele_vals[key] = ElementComplex(value, key)
+        object.__setattr__(self, "stored_values", ele_vals)
+
+    @classmethod
+    def with_weights(cls, values, weights):
+        """
+        Create a new database the uses weight normalized scattering factors for use with g/cm³ density.
+        """
+        self = object.__new__(cls)
+        Database.__init__(self)
+
+        ele_vals = {}
+        for key, value in values.items():
+            if type(value) in [float, complex] and key in weights:
+                ele_vals[key] = ElementComplex(value, key) * (0.6022141 / weights[key])
+        object.__setattr__(self, "stored_values", ele_vals)
+        return self
 
     def lookup_value(self, name):
         raise LookupError("The element %s does not exist in the database" % name)
@@ -433,7 +492,7 @@ def create_fp_lookup(path):
         f1_e = (energy - e[pos1]) * (f1[pos2] - f1[pos1]) / (e[pos2] - e[pos1]) + f1[pos1]
         f2_e = (energy - e[pos1]) * (f2[pos2] - f2[pos1]) / (e[pos2] - e[pos1]) + f2[pos1]
 
-        return f1_e - 1.0j * f2_e
+        return complex(f1_e - 1.0j * f2_e)
 
     return lookup_func
 
