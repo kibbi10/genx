@@ -10,7 +10,8 @@ import matplotlib as mpl
 
 # Common style for both light and dark themes
 _COMMON_RC = {
-    "axes.labelsize": 16,
+    "figure.subplot.wspace": 0,
+    "axes.labelsize": 13,
     "xtick.labelsize": 12,
     "xtick.direction": "in",
     "xtick.minor.visible": True,
@@ -18,6 +19,8 @@ _COMMON_RC = {
     "ytick.direction": "in",
     "ytick.minor.visible": True,
     "axes.linewidth": 1.5,
+    "axes.grid": True,
+    "grid.linestyle": '--',
 }
 
 # Additional colours for dark theme

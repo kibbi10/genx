@@ -490,9 +490,10 @@ class ValueLimitCellEditor(gridlib.GridCellEditor):
 class ValueLimitCellRenderer(gridlib.GridCellRenderer):
     """Renderer for the Parameter Values. Colours the Cell if the value is out of bounds."""
 
-    def __init__(self, model_ctrl: ModelController, value=0, max_value=100.0, min_value=100):
+    def __init__(self, model_ctrl: ModelController, value=0, max_value=100.0, min_value=100, is_dark: bool = False):
         gridlib.GridCellRenderer.__init__(self)
         self.model_ctrl: ModelController = model_ctrl
+        self.is_dark: bool = is_dark
 
     def Draw(self, grid, attr, dc, rect, row, col, isSelected):
         if grid.GetCellValue(row, col) != "":
@@ -529,7 +530,11 @@ class ValueLimitCellRenderer(gridlib.GridCellRenderer):
 
             if val <= max_val and val >= min_val:
                 # paint a slight indication of rlative value within range
-                dc.SetBrush(wx.Brush(wx.Colour(240, 240, 240), wx.SOLID))
+                if self.is_dark:
+                    slider_colour = wx.Colour(80, 80, 80)
+                else:
+                    slider_colour = wx.Colour(240, 240, 240)
+                dc.SetBrush(wx.Brush(slider_colour, wx.SOLID))
                 if max_val != min_val:
                     rel_value_pix = int(rect.width * (val - min_val) / (max_val - min_val))
                 else:
@@ -844,7 +849,7 @@ class ParameterGrid(wx.Panel, Configurable):
 
         self.toolbar.Realize()
         self.col_attr = gridlib.GridCellAttr()
-        self.col_attr.SetRenderer(ValueLimitCellRenderer(model_ctrl=model_ctrl))
+        self.col_attr.SetRenderer(ValueLimitCellRenderer(model_ctrl=model_ctrl, is_dark=is_dark))
         self.SetValueEditorSlider(slider=self.opt.value_slider)
         attr = gridlib.GridCellAttr()
         attr.SetEditor(ValueCellEditor())
