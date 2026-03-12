@@ -39,7 +39,7 @@ class ParameterDataTable(gridlib.GridTableBase):
         gridlib.GridTableBase.__init__(self)
         self.parent = parent
         self.pars = parameters.Parameters()
-
+        print("Hello")
         self.data_types = [
             gridlib.GRID_VALUE_STRING,
             gridlib.GRID_VALUE_FLOAT,
@@ -766,6 +766,24 @@ class ParameterGrid(wx.Panel, Configurable):
         self.grid.DisableDragRowSize()
         # self.grid.SetForegroundColour('BLUE')
 
+        # Detecting dark mode
+        is_dark = False
+        try:
+            appearance = wx.SystemSettings.GetAppearance()
+            if hasattr(appearance, "IsDark"):
+                is_dark = appearance.IsDark()
+        except AttributeError:
+            # Fallback: infer from system window colour brightness
+            col = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+            r, g, b = col.Get()
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            is_dark = luminance < 128
+        
+        if is_dark:
+            print('What I found:', is_dark)
+            fg = wx.Colour(255, 255, 255)
+            self.grid.SetDefaultCellTextColour(fg)
+            self.grid.SetLabelTextColour(fg)
         self.do_toolbar()
 
         self.sizer_hor = wx.BoxSizer(wx.HORIZONTAL)
