@@ -1081,9 +1081,12 @@ class DataPlotPanel(PlotPanel):
 
             gs = GridSpec(4, 1)
         self.ax = self.figure.add_subplot(gs[:3, 0])
-        # self.ax.xaxis.set_visible(False)
-        self.ax.get_xaxis().set_visible(False)
-        # setp(self.ax.get_xticklabels(), visible=False)
+        # Hide duplicate x tick labels on the main axes but keep the
+        # x-axis itself enabled so vertical gridlines remain visible.
+        #try:
+        self.ax.tick_params(axis="x", which="both", labelbottom=False)
+        #except Exception:
+        #    pass
         self.error_ax = self.figure.add_subplot(gs[3, 0], sharex=self.ax)
         # self.error_ax = self.figure.add_axes(self.sub_ax_rect, sharex=self.ax)
         self.ax.set_autoscale_on(False)

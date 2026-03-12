@@ -39,7 +39,6 @@ class ParameterDataTable(gridlib.GridTableBase):
         gridlib.GridTableBase.__init__(self)
         self.parent = parent
         self.pars = parameters.Parameters()
-        print("Hello")
         self.data_types = [
             gridlib.GRID_VALUE_STRING,
             gridlib.GRID_VALUE_FLOAT,
@@ -529,8 +528,17 @@ class ValueLimitCellRenderer(gridlib.GridCellRenderer):
             text = "%.7g" % val
 
             if val <= max_val and val >= min_val:
-                # paint a slight indication of rlative value within range
-                if self.is_dark:
+                # Paint a slight indication of relative value within range.
+                # Now this statement is toggled when user changes dark/light 
+                is_dark = self.is_dark
+                try:
+                    parent = grid.GetParent()
+                    if hasattr(parent, "is_dark"):
+                        is_dark = bool(parent.is_dark)
+                except Exception:
+                    pass
+
+                if is_dark:
                     slider_colour = wx.Colour(80, 80, 80)
                 else:
                     slider_colour = wx.Colour(240, 240, 240)
