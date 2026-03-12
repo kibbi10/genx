@@ -305,20 +305,6 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         # React to system theme / colour changes (dark/light mode etc.)
         self.Bind(wx.EVT_SYS_COLOUR_CHANGED, self.on_sys_colour_changed)
 
-        # Apply initial theme based on current system appearance
-        try:
-            appearance = wx.SystemSettings.GetAppearance()
-            if hasattr(appearance, "IsDark"):
-                initial_dark = appearance.IsDark()
-            else:
-                raise AttributeError
-        except AttributeError:
-            col = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
-            r, g, b = col.Get()
-            luminance = 0.299 * r + 0.587 * g + 0.114 * b
-            initial_dark = luminance < 128
-        self.apply_theme(initial_dark)
-
         debug("finished setup of MainFrame")
 
     def create_menu(self):
@@ -732,45 +718,6 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         if fpage != tpage and self.input_notebook.GetPageText(fpage) == "Script":
             self.model_control.set_model_script(self.script_editor.GetText())
 
-    def apply_theme(self, is_dark: bool):
-        """Apply a dark/light theme to the main window on platforms like Windows.
-
-        On macOS and Linux, the native toolkit already handles most colours when
-        the system theme changes, so this is mainly useful on Windows where
-        wxWidgets does not automatically provide a dark client area.
-        """
-        # Only force custom backgrounds on Windows to avoid fighting native
-        # theming on platforms that already look correct.
-        if not sys.platform.startswith("win"):
-            return
-
-        if is_dark:
-            bg = wx.Colour(30, 30, 30)
-            fg = wx.Colour(230, 230, 230)
-        else:
-            try:
-                bg = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
-                fg = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT)
-            except Exception:
-                bg = wx.Colour(255, 255, 255)
-                fg = wx.Colour(0, 0, 0)
-
-        def _apply_to_children(window: wx.Window):
-            try:
-                window.SetBackgroundColour(bg)
-                window.SetForegroundColour(fg)
-            except Exception:
-                return
-            for child in window.GetChildren():
-                _apply_to_children(child)
-
-        _apply_to_children(self)
-        try:
-            self.Layout()
-        except Exception:
-            pass
-        self.Refresh()
-
     def on_sys_colour_changed(self, event):
         """Handle system colour/theme changes and propagate to subwidgets."""
         # Determine current dark/light appearance
@@ -784,9 +731,6 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
             r, g, b = col.Get()
             luminance = 0.299 * r + 0.587 * g + 0.114 * b
             is_dark = luminance < 128
-
-        # Apply platform-specific frame/panel colours (especially needed on Windows)
-        self.apply_theme(is_dark)
 
         # Update parameter grid theme (slider background, text colours, etc.)
         try:
