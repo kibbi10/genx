@@ -504,13 +504,20 @@ class ValueLimitCellRenderer(gridlib.GridCellRenderer):
                     bkg_colour = wx.Colour(204, 0, 0)
                 else:
                     bkg_colour = wx.Colour(255, 150, 100)
-                txt_colour = wx.Colour(255, 255, 255)
             else:
                 if not isSelected:
                     bkg_colour = attr.GetBackgroundColour()
+                    txt_colour = attr.GetTextColour()
                 else:
                     bkg_colour = grid.GetSelectionBackground()
-                txt_colour = wx.Colour(0, 0, 0)
+                    txt_colour = grid.GetSelectionForeground()
+
+                # For in-bounds values we use the attribute/grid text colour,
+                # which you set up from the OS theme (white in dark mode).
+            if val > max_val or val < min_val:
+                # Out-of-bounds values keep their dedicated warning colours
+                # with white text for maximum contrast on both light/dark.
+                txt_colour = wx.Colour(255, 255, 255)
 
             dc.SetBackgroundMode(wx.SOLID)
             dc.SetBrush(wx.Brush(bkg_colour, wx.SOLID))
@@ -691,9 +698,10 @@ class ValueCellRenderer(gridlib.GridCellRenderer):
                     bkg_colour = attr.GetBackgroundColour()
                 else:
                     bkg_colour = wx.Colour(150, 150, 150)
+                txt_colour = attr.GetTextColour()
             else:
                 bkg_colour = grid.GetSelectionBackground()
-            txt_colour = wx.Colour(0, 0, 0)
+                txt_colour = grid.GetSelectionForeground()
 
             dc.SetBackgroundMode(wx.SOLID)
             dc.SetBrush(wx.Brush(bkg_colour, wx.SOLID))
