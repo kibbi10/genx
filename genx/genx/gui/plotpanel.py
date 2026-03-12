@@ -21,6 +21,7 @@ from numpy import arange, array, c_, floor, hstack, isfinite, ma, newaxis, sign
 from wx import LANDSCAPE, PAPER_A4
 
 from ..core.config import BaseConfig, Configurable
+from ..core.mpl_config import apply_genx_mpl_style
 from ..data import DataList
 from ..model import Model
 from .custom_events import plot_position, skips_event, state_changed
@@ -30,6 +31,9 @@ getLogger("matplotlib.ticker").setLevel(ERROR)
 getLogger("matplotlib.font_manager").setLevel(ERROR)
 
 zoom_state = False
+
+# Apply a consistent matplotlib style (including dark-mode colours) once
+apply_genx_mpl_style()
 
 
 # fix a bug in wx/matplotlib where keeping a motion event reference breaks scrolling

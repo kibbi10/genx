@@ -1091,6 +1091,9 @@ class DataList(H5Savable):
 
     def plot(self, data_labels=None, sim_labels=None):
         # convenience function to plot all datasets with matplotlib
+        from .core.mpl_config import apply_genx_mpl_style
+        apply_genx_mpl_style()
+
         from matplotlib import pyplot as plt
 
         for i, ds in enumerate(self.items):

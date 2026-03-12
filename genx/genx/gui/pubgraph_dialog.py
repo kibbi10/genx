@@ -16,7 +16,12 @@ from numpy import (arange, arccos, arcsin, arctan, array, cos, exp, hstack, lins
 from wx.py.editwindow import EditWindow
 
 from ..core.config import BaseConfig, Configurable
+from ..core.mpl_config import apply_genx_mpl_style
 from ..data import DataList, DataSet
+
+
+# Ensure publication-graphics figures follow the global matplotlib style
+apply_genx_mpl_style()
 
 
 # ==============================================================================
