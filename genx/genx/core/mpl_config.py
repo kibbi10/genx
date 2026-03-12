@@ -35,6 +35,18 @@ _DARK_RC = {
     "grid.color": "gray",
 }
 
+# Explicit light-theme colours (so switching back from dark resets properly)
+_LIGHT_RC = {
+    "figure.facecolor": "white",
+    "axes.facecolor": "white",
+    "axes.edgecolor": "black",
+    "axes.labelcolor": "black",
+    "xtick.color": "black",
+    "ytick.color": "black",
+    "text.color": "black",
+    "grid.color": "lightgray",
+}
+
 
 def _detect_dark_mode() -> bool:
     """Best-effort detection of OS dark mode via wx.
@@ -78,5 +90,7 @@ def apply_genx_mpl_style(is_dark: Optional[bool] = None) -> None:
     rc = dict(_COMMON_RC)
     if is_dark:
         rc.update(_DARK_RC)
+    else:
+        rc.update(_LIGHT_RC)
 
     mpl.rcParams.update(rc)

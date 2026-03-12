@@ -302,6 +302,9 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         if self.opt.single_instance:
             self.single_instance_activate()
 
+        # React to system theme / colour changes (dark/light mode etc.)
+        self.Bind(wx.EVT_SYS_COLOUR_CHANGED, self.on_sys_colour_changed)
+
         debug("finished setup of MainFrame")
 
     def create_menu(self):
@@ -714,6 +717,46 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
             return
         if fpage != tpage and self.input_notebook.GetPageText(fpage) == "Script":
             self.model_control.set_model_script(self.script_editor.GetText())
+
+    def on_sys_colour_changed(self, event):
+        """Handle system colour/theme changes and propagate to subwidgets."""
+        # Determine current dark/light appearance
+        is_dark = False
+        try:
+            appearance = wx.SystemSettings.GetAppearance()
+            if hasattr(appearance, "IsDark"):
+                is_dark = appearance.IsDark()
+        except AttributeError:
+            col = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+            r, g, b = col.Get()
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            is_dark = luminance < 128
+
+        # Update parameter grid theme (slider background, text colours, etc.)
+        try:
+            if hasattr(self, "paramter_grid") and self.paramter_grid is not None:
+                self.paramter_grid.update_theme(is_dark)
+        except Exception:
+            debug("Failed to update ParameterGrid theme on system colour change", exc_info=True)
+
+        # Update plotting panels (matplotlib or WX-native) to match theme
+        for panel_attr in ("plot_data", "plot_fom", "plot_pars", "plot_fomscan"):
+            try:
+                panel = getattr(self, panel_attr, None)
+                if panel is not None and hasattr(panel, "update_theme"):
+                    panel.update_theme(is_dark)
+            except Exception:
+                debug(f"Failed to update theme for panel {panel_attr}", exc_info=True)
+
+        # Update any plugin plot panels (e.g. SLD plots in reflectivity plugins)
+        try:
+            if hasattr(self, "plugin_control") and self.plugin_control is not None:
+                self.plugin_control.OnThemeChanged(is_dark)
+        except Exception:
+            debug("Failed to update plugin themes on system colour change", exc_info=True)
+
+        # Let wxWidgets process its own colour updates too
+        event.Skip()
 
     def scan_parameter(self, row):
         """

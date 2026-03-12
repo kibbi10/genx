@@ -130,6 +130,82 @@ class PlotPanel(wx.Panel, Configurable):
         self.fig_printer = FigurePrinter(self)
         debug("end init PlotPanel")
 
+    def update_theme(self, is_dark: bool):
+        """Update matplotlib theme and background when system theme changes."""
+        # Reapply GenX matplotlib style for the new theme
+        apply_genx_mpl_style(is_dark=is_dark)
+
+        # Update figure and axes colours from the new rcParams
+        try:
+            # Figure background
+            self.figure.set_facecolor(matplotlib.rcParams.get("figure.facecolor", "white"))
+
+            # Axes and text colours
+            for ax in list(self.figure.axes):
+                try:
+                    ax.set_facecolor(matplotlib.rcParams.get("axes.facecolor", "white"))
+                    # Spines
+                    edge_col = matplotlib.rcParams.get("axes.edgecolor", "black")
+                    for spine in ax.spines.values():
+                        spine.set_color(edge_col)
+                    # Tick colours
+                    x_tick_col = matplotlib.rcParams.get("xtick.color", "black")
+                    y_tick_col = matplotlib.rcParams.get("ytick.color", "black")
+                    ax.tick_params(axis="x", colors=x_tick_col)
+                    ax.tick_params(axis="y", colors=y_tick_col)
+                    # Axis labels and title
+                    label_col = matplotlib.rcParams.get("axes.labelcolor", "black")
+                    ax.xaxis.label.set_color(label_col)
+                    ax.yaxis.label.set_color(label_col)
+                    ax.title.set_color(matplotlib.rcParams.get("text.color", label_col))
+                    # Legend (if any)
+                    leg = ax.get_legend()
+                    if leg is not None:
+                        for text in leg.get_texts():
+                            text.set_color(matplotlib.rcParams.get("text.color", label_col))
+                        frame = leg.get_frame()
+                        frame.set_facecolor(matplotlib.rcParams.get("axes.facecolor", "white"))
+                        frame.set_edgecolor(matplotlib.rcParams.get("axes.edgecolor", "black"))
+                    # Grid colour / style (detect if any gridlines are visible)
+                    gridlines = ax.get_xgridlines() + ax.get_ygridlines()
+                    if any(gl.get_visible() for gl in gridlines):
+                        ax.grid(
+                            True,
+                            color=matplotlib.rcParams.get("grid.color", "lightgray"),
+                            linestyle=matplotlib.rcParams.get("grid.linestyle", "--"),
+                        )
+                except Exception:
+                    # Do not let one problematic axes prevent others updating
+                    continue
+        except Exception:
+            pass
+
+        # Sync canvas background roughly with figure background
+        try:
+            fig_bg = self.figure.get_facecolor()
+            rgb = tuple(int(255 * c) for c in fig_bg[:3])
+            self.canvas.SetBackgroundColour(wx.Colour(*rgb))
+        except Exception:
+            pass
+
+        # Optionally tint the toolbar to match theme
+        try:
+            if is_dark:
+                self.toolbar.SetBackgroundColour(wx.Colour(30, 30, 30))
+                self.toolbar.SetForegroundColour(wx.Colour(230, 230, 230))
+            else:
+                self.toolbar.SetBackgroundColour(wx.NullColour)
+                self.toolbar.SetForegroundColour(wx.NullColour)
+            self.toolbar.Refresh()
+        except Exception:
+            pass
+
+        # Redraw current content (if any) with new colours
+        try:
+            self.flush_plot()
+        except Exception:
+            pass
+
     def OnMPLButton(self, event):
         if self.toolbar.mode.name!='NONE':
             return

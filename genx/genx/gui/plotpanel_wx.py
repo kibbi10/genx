@@ -92,6 +92,27 @@ class PlotPanel(wx.Panel, Configurable):
         self.canvas.canvas.Bind(wx.EVT_RIGHT_UP, self.OnContextMenu)
         self.canvas.enablePointLabel = True
 
+    def update_theme(self, is_dark: bool):
+        """Update WX-native plot colours when system theme changes."""
+        try:
+            if is_dark:
+                bg = wx.Colour(0, 0, 0)
+                fg = wx.Colour(255, 255, 255)
+            else:
+                # Use system window/text colours in light mode
+                bg = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+                fg = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT)
+
+            self.canvas.SetBackgroundColour(bg)
+            self.canvas.SetForegroundColour(fg)
+        except Exception:
+            pass
+
+        try:
+            self.do_replot()
+        except Exception:
+            pass
+
     def OnPlotDraw(self, event):
         """Sin, Cos, and Points"""
         self.resetDefaults()

@@ -559,12 +559,7 @@ class ValueLimitCellRenderer(gridlib.GridCellRenderer):
             dc.DrawRectangle(rect.x, rect.y, rect.width, rect.height)
 
     def Clone(self):
-        return ValueLimitCellRenderer(
-            self.model_ctrl,
-            self.slider_drawer.value,
-            max=self.slider_drawer.max_value,
-            min=self.slider_drawer.min_value,
-        )
+        return ValueLimitCellRenderer(self.model_ctrl, is_dark=self.is_dark)
 
 
 class ValueCellEditor(gridlib.GridCellEditor):
@@ -791,9 +786,9 @@ class ParameterGrid(wx.Panel, Configurable):
             r, g, b = col.Get()
             luminance = 0.299 * r + 0.587 * g + 0.114 * b
             is_dark = luminance < 128
-        
+
+        self.is_dark = is_dark
         if is_dark:
-            print('What I found:', is_dark)
             fg = wx.Colour(255, 255, 255)
             self.grid.SetDefaultCellTextColour(fg)
             self.grid.SetLabelTextColour(fg)
@@ -849,7 +844,7 @@ class ParameterGrid(wx.Panel, Configurable):
 
         self.toolbar.Realize()
         self.col_attr = gridlib.GridCellAttr()
-        self.col_attr.SetRenderer(ValueLimitCellRenderer(model_ctrl=model_ctrl, is_dark=is_dark))
+        self.col_attr.SetRenderer(ValueLimitCellRenderer(model_ctrl=model_ctrl, is_dark=self.is_dark))
         self.SetValueEditorSlider(slider=self.opt.value_slider)
         attr = gridlib.GridCellAttr()
         attr.SetEditor(ValueCellEditor())
@@ -858,6 +853,35 @@ class ParameterGrid(wx.Panel, Configurable):
         self.grid.SetColAttr(3, attr.Clone())
         self.grid.SetColAttr(4, attr)
         self._paste_history = None
+
+    def update_theme(self, is_dark: bool):
+        """Update colours and renderers when system theme changes."""
+        self.is_dark = is_dark
+
+        # Update grid text colours according to theme
+        if is_dark:
+            fg = wx.Colour(255, 255, 255)
+        else:
+            try:
+                fg = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT)
+            except Exception:
+                fg = wx.Colour(0, 0, 0)
+
+        self.grid.SetDefaultCellTextColour(fg)
+        self.grid.SetLabelTextColour(fg)
+
+        # Update the in-range slider background renderer to respect dark mode
+        try:
+            col_attr = self.grid.GetColAttr(1)
+            if col_attr is not None:
+                renderer = col_attr.GetRenderer()
+                if isinstance(renderer, ValueLimitCellRenderer):
+                    renderer.is_dark = is_dark
+        except Exception:
+            # Non-fatal: theme update should not crash the app
+            pass
+
+        self.grid.ForceRefresh()
 
     def PrepareNewModel(self):
         """Hack to prepare the grid for a new model."""

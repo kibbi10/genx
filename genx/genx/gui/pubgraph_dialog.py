@@ -58,6 +58,43 @@ class SimplePlotPanel(wx.Panel):
         self._isDrawn = False
         debug("end init PlotPanel")
 
+    def update_theme(self, is_dark: bool):
+        """Update this simple publication plot to match dark/light theme."""
+        # Reapply global GenX matplotlib style for the given theme
+        apply_genx_mpl_style(is_dark=is_dark)
+
+        try:
+            import matplotlib as mpl
+
+            # Figure background
+            self.figure.set_facecolor(mpl.rcParams.get("figure.facecolor", "white"))
+
+            for ax in list(self.figure.axes):
+                try:
+                    ax.set_facecolor(mpl.rcParams.get("axes.facecolor", "white"))
+                    edge_col = mpl.rcParams.get("axes.edgecolor", "black")
+                    for spine in ax.spines.values():
+                        spine.set_color(edge_col)
+                    x_tick_col = mpl.rcParams.get("xtick.color", "black")
+                    y_tick_col = mpl.rcParams.get("ytick.color", "black")
+                    ax.tick_params(axis="x", colors=x_tick_col)
+                    ax.tick_params(axis="y", colors=y_tick_col)
+                    label_col = mpl.rcParams.get("axes.labelcolor", "black")
+                    ax.xaxis.label.set_color(label_col)
+                    ax.yaxis.label.set_color(label_col)
+                    ax.title.set_color(mpl.rcParams.get("text.color", label_col))
+                except Exception:
+                    continue
+
+            # Match canvas background to figure
+            fig_bg = self.figure.get_facecolor()
+            rgb = tuple(int(255 * c) for c in fig_bg[:3])
+            self.canvas.SetBackgroundColour(wx.Colour(*rgb))
+        except Exception:
+            pass
+
+        self.flush_plot()
+
     def clear(self):
         self.figure.clear()
         self.ax = self.figure.add_subplot(111)
@@ -266,7 +303,29 @@ class PublicationDialog(wx.Dialog, Configurable):
         self.Bind(wx.EVT_BUTTON, self.OnStoreDefaults, save_button)
         self.Bind(wx.EVT_COMMAND_ENTER, self.OnPlot)
         self.Bind(wx.EVT_SPINCTRLDOUBLE, self.OnPlot)
+        self.Bind(wx.EVT_SYS_COLOUR_CHANGED, self.on_sys_colour_changed)
         self.SetSize(wx.Size(800, 800))
+
+    def on_sys_colour_changed(self, event):
+        """Propagate system theme changes to the publication plot panel."""
+        is_dark = False
+        try:
+            appearance = wx.SystemSettings.GetAppearance()
+            if hasattr(appearance, "IsDark"):
+                is_dark = appearance.IsDark()
+        except AttributeError:
+            col = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+            r, g, b = col.Get()
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            is_dark = luminance < 128
+
+        try:
+            if hasattr(self, "plot") and self.plot is not None:
+                self.plot.update_theme(is_dark)
+        except Exception:
+            pass
+
+        event.Skip()
 
     def SaveFromScript(self, wildcard="*.png"):
         # called from within the script to select file name to save to
