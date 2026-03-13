@@ -866,16 +866,25 @@ class ParameterGrid(wx.Panel, Configurable):
         """Update colours and renderers when system theme changes."""
         self.is_dark = is_dark
 
-        # Update grid text colours according to theme
-        if is_dark:
-            fg = wx.Colour(255, 255, 255)
-        else:
-            try:
-                fg = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT)
-            except Exception:
-                fg = wx.Colour(0, 0, 0)
+        # Update grid background and text colours according to current theme.
+        # Use system window/text colours so we follow the native toolkit theme,
+        # which is important on Linux where wx may not automatically
+        # re-theme existing controls.
+        try:
+            bg = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+        except Exception:
+            bg = wx.Colour(0, 0, 0) if is_dark else wx.Colour(255, 255, 255)
 
+        try:
+            fg = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT)
+        except Exception:
+            fg = wx.Colour(255, 255, 255) if is_dark else wx.Colour(0, 0, 0)
+
+        # Apply to grid background, default cells and labels
+        self.grid.SetBackgroundColour(bg)
+        self.grid.SetDefaultCellBackgroundColour(bg)
         self.grid.SetDefaultCellTextColour(fg)
+        self.grid.SetLabelBackgroundColour(bg)
         self.grid.SetLabelTextColour(fg)
 
         # Update the in-range slider background renderer to respect dark mode
