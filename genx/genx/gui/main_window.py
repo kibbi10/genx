@@ -214,6 +214,19 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         self.__set_properties()
         self.__do_layout()
 
+        # Detect initial dark/light appearance so child widgets (e.g. plugins)
+        # can query self.is_dark during construction.
+        self.is_dark = False
+        try:
+            appearance = wx.SystemSettings.GetAppearance()
+            if hasattr(appearance, "IsDark"):
+                self.is_dark = appearance.IsDark()
+        except AttributeError:
+            col = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+            r, g, b = col.Get()
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            self.is_dark = luminance < 128
+
         debug("setup of MainFrame - bind")
         self.bind_menu()
         self.bind_toolbar()
@@ -731,6 +744,10 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
             r, g, b = col.Get()
             luminance = 0.299 * r + 0.587 * g + 0.114 * b
             is_dark = luminance < 128
+
+        # Store on the main window so child widgets relying on
+        # parent.is_dark (e.g. plugin panels) see the updated value.
+        self.is_dark = is_dark
 
         # Update parameter grid theme (slider background, text colours, etc.)
         try:

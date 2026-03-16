@@ -580,7 +580,10 @@ class Plugin(framework.Template, SampleBuilder, wx.EvtHandler):
         self.model = self.GetModel().script_module.model
         sample = self.GetModel().script_module.sample
 
-        self.sampleh = SampleHandler(sample, all_names)
+        # Pass current theme information into SampleHandler so it can
+        # choose appropriate colours for HTML output (e.g. stack lines).
+        is_dark = getattr(self.parent, "is_dark", False)
+        self.sampleh = SampleHandler(sample, all_names, is_dark=is_dark)
         self.sampleh.set_model(self.model)
         self.sample_widget.set_sampleh(self.sampleh)
         self.sample_widget.set_model(self.model)
@@ -613,3 +616,15 @@ class Plugin(framework.Template, SampleBuilder, wx.EvtHandler):
             self.SetXAxis(self.sample_widget.instruments[instrument_names[0]])
         except AttributeError:
             pass
+    
+    def OnThemeChanged(self, is_dark: bool):
+        # Let the base class recolour any plot pages (SLD plot etc.)
+        framework.Template.OnThemeChanged(self, is_dark)
+        
+        # Update the Sample tab
+        if hasattr(self, "sample_widget") and hasattr(self.sample_widget, "updateTheme"):
+            self.sample_widget.updateTheme(is_dark)
+
+        # If you later add theming for the Simulations tab:
+        if hasattr(self, "simulation_widget") and hasattr(self.simulation_widget, "updateTheme"):
+            self.simulation_widget.updateTheme(is_dark)
