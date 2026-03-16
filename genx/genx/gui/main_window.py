@@ -160,6 +160,20 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         self.dpi_scale_factor = dpi_scale_factor
         wx.GetApp().dpi_scale_factor = dpi_scale_factor
 
+
+        # Detect initial dark/light appearance so child widgets (e.g. plugins)
+        # can query self.is_dark during construction.
+        self.is_dark = False
+        try:
+            appearance = wx.SystemSettings.GetAppearance()
+            if hasattr(appearance, "IsDark"):
+                self.is_dark = appearance.IsDark()
+        except AttributeError:
+            col = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+            r, g, b = col.Get()
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            self.is_dark = luminance < 128
+        
         # GenX objects
         self.model_control = solvergui.ModelControlGUI(self)
         self.model_control.set_update_min_time(self.opt.solver_update_time)  # update time from configuration
@@ -206,26 +220,39 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         self.input_notebook_script = wx.Panel(self.input_notebook, wx.ID_ANY)
         self.script_editor = wx.py.editwindow.EditWindow(self.input_notebook_script, wx.ID_ANY)
         self.script_editor.SetBackSpaceUnIndents(True)
+        #appearance = wx.SystemSettings.GetAppearance()
+        #if hasattr(appearance, "IsDark"):
+        #    self.is_dark = appearance.IsDark()
+        # First configure the default style so StyleClearAll can propagate it
+        if self.is_dark:
+            self.script_editor.StyleSetBackground(wx.stc.STC_STYLE_DEFAULT, "#333333")
+            self.script_editor.StyleSetForeground(wx.stc.STC_STYLE_DEFAULT, "#D0D0D0")
+        else:
+            self.script_editor.StyleSetBackground(wx.stc.STC_STYLE_DEFAULT, "#bfbfbf")
+            self.script_editor.StyleSetForeground(wx.stc.STC_STYLE_DEFAULT, "#000000")
+
+        # Copy the default style to all lexer styles so they all share
+        # the same background; we then override selected ones below.
+        self.script_editor.StyleClearAll()
+
+        if self.is_dark:
+            self.script_editor.SetCaretForeground("#FFFFFF")
+            self.script_editor.SetSelBackground(True, "#264F78")
+            # Python lexer token colours for dark mode
+            self.script_editor.StyleSetForeground(wx.stc.STC_P_COMMENTLINE, "#6A9955")
+            self.script_editor.StyleSetForeground(wx.stc.STC_P_STRING, "#CE9178")
+            self.script_editor.StyleSetForeground(wx.stc.STC_P_NUMBER, "#B5CEA8")
+            self.script_editor.StyleSetForeground(wx.stc.STC_P_WORD, "#569CD6")
         self.script_editor.AutoCompSetChooseSingle(True)
         self.script_editor.AutoCompSetIgnoreCase(False)
         self.script_editor.Bind(wx.EVT_KEY_DOWN, self.ScriptEditorKeyEvent)
+
 
         debug("setup of MainFrame - properties and layout")
         self.__set_properties()
         self.__do_layout()
 
-        # Detect initial dark/light appearance so child widgets (e.g. plugins)
-        # can query self.is_dark during construction.
-        self.is_dark = False
-        try:
-            appearance = wx.SystemSettings.GetAppearance()
-            if hasattr(appearance, "IsDark"):
-                self.is_dark = appearance.IsDark()
-        except AttributeError:
-            col = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
-            r, g, b = col.Get()
-            luminance = 0.299 * r + 0.587 * g + 0.114 * b
-            self.is_dark = luminance < 128
+        
 
         debug("setup of MainFrame - bind")
         self.bind_menu()
