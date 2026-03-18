@@ -25,7 +25,7 @@ _COMMON_RC = {
 
 # Additional colours for dark theme
 _DARK_RC = {
-    "figure.facecolor": "black",
+    "figure.facecolor": "#1e1e1e",
     "axes.facecolor": "black",
     "axes.edgecolor": "white",
     "axes.labelcolor": "white",
@@ -37,8 +37,8 @@ _DARK_RC = {
 
 # Explicit light-theme colours (so switching back from dark resets properly)
 _LIGHT_RC = {
-    "figure.facecolor": "white",
-    "axes.facecolor": "white",
+    "figure.facecolor": "#e7e7e7",
+    "axes.facecolor": "#F4F1F1",
     "axes.edgecolor": "black",
     "axes.labelcolor": "black",
     "xtick.color": "black",
