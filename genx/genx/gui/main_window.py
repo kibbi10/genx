@@ -228,7 +228,7 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
             self.script_editor.StyleSetBackground(wx.stc.STC_STYLE_DEFAULT, "#333333")
             self.script_editor.StyleSetForeground(wx.stc.STC_STYLE_DEFAULT, "#D0D0D0")
         else:
-            self.script_editor.StyleSetBackground(wx.stc.STC_STYLE_DEFAULT, "#bfbfbf")
+            self.script_editor.StyleSetBackground(wx.stc.STC_STYLE_DEFAULT, "#e7e7e7")
             self.script_editor.StyleSetForeground(wx.stc.STC_STYLE_DEFAULT, "#000000")
 
         # Copy the default style to all lexer styles so they all share

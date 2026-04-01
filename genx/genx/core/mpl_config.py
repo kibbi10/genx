@@ -38,7 +38,7 @@ _DARK_RC = {
 # Explicit light-theme colours (so switching back from dark resets properly)
 _LIGHT_RC = {
     "figure.facecolor": "#e7e7e7",
-    "axes.facecolor": "#F4F1F1",
+    "axes.facecolor": "#FFFFFF",
     "axes.edgecolor": "black",
     "axes.labelcolor": "black",
     "xtick.color": "black",
