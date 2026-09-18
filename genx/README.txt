@@ -12,6 +12,15 @@ References
 If you use the program please give reference to the following publication:
 A. Glavic and M. Björck J. Appl. Cryst. 55, 1063-1071 (2022).
 
+Changes 3.9.0
+=============
+ * Change SimpleReflectivity behavior for fitting mixures. Now the model uses a custom parameter,
+   so update after the fit works properly and change to advanced Reflectivity plugin keeps the mix parameter available
+   (#11)
+ * Fix some bugs causing crashes of newer wxPython library versions
+ * Fix bug where the evaluate option would report parameter definition issues if simulation included NaN values
+ * Fix a UI issue where changing instrument parameters would wrongly update the model to fail in certain cases
+
 Changes 3.8.11
 ==============
  * Fix a bug where spec_adaptive model did not deal with negative magnetization values correctly for n
