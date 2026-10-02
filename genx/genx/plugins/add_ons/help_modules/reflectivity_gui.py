@@ -692,7 +692,7 @@ class SamplePanel(wx.Panel):
             return self.UpdateInstrumentConfigurationNew(
                 editable, eval_func, grid_parameters, model_inst_params, old_vals, states, vals
             )
-        self.instruments = {}
+        # self.instruments = {}
         for inst_name in vals:
             new_instrument = False
             if inst_name not in self.instruments:
@@ -726,7 +726,7 @@ class SamplePanel(wx.Panel):
     def UpdateInstrumentConfigurationNew(
         self, editable, eval_func, grid_parameters, model_inst_params, old_vals, states, vals
     ):
-        self.instruments = {}
+        # self.instruments = {}
         for inst_name in vals:
             new_instrument = False
             if inst_name not in self.instruments:

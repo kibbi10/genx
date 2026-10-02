@@ -12,6 +12,39 @@ References
 If you use the program please give reference to the following publication:
 A. Glavic and M. Björck J. Appl. Cryst. 55, 1063-1071 (2022).
 
+Changes 3.9.0
+=============
+ * Change SimpleReflectivity behavior for fitting mixures. Now the model uses a custom parameter,
+   so update after the fit works properly and change to advanced Reflectivity plugin keeps the mix parameter available
+   (#11)
+ * Fix some bugs causing crashes of newer wxPython library versions
+ * Fix bug where the evaluate option would report parameter definition issues if simulation included NaN values
+ * Fix a UI issue where changing instrument parameters would wrongly update the model to fail in certain cases
+
+Changes 3.8.11
+==============
+ * Fix a bug where spec_adaptive model did not deal with negative magnetization values correctly for n
+   pol simulations. (#23)
+ * Fix issue where changing some model configuration after a fit lead to errors in the script (np.float64).
+ * Fix incompatibility with bumps library version >=1.0.4.
+
+Changes 3.8.10
+==============
+ * Fix a bug caused by orsopy library trying to download database from wrong location
+ * When parsing ORSO model language layers that can't be resolved, replace with empty layer
+ * Fix an issue in the specloader
+
+Changes 3.8.9
+=============
+ * Fix a bug where the batch fitting failed if not all datasets had the same number of points
+
+Changes 3.8.8
+=============
+ * Fix Mac OS fitting crash due to incompatibility with new numpy version (#21, thanks to kibbi10)
+ * Fix incompatibility with Python 3.14 typing system
+ * Fix potential issues with names in ORSO model analyzer
+ * Reallow ReflFunction energy dependent scattering factors for f/fm1/fm2 parameters in mag_refl model
+
 Changes 3.8.7
 =============
  * Fix Mac OS file icons for genx and orso files
