@@ -160,6 +160,20 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         self.dpi_scale_factor = dpi_scale_factor
         wx.GetApp().dpi_scale_factor = dpi_scale_factor
 
+
+        # Detect initial dark/light appearance so child widgets (e.g. plugins)
+        # can query self.is_dark during construction.
+        self.is_dark = False
+        try:
+            appearance = wx.SystemSettings.GetAppearance()
+            if hasattr(appearance, "IsDark"):
+                self.is_dark = appearance.IsDark()
+        except AttributeError:
+            col = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+            r, g, b = col.Get()
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            self.is_dark = luminance < 128
+        
         # GenX objects
         self.model_control = solvergui.ModelControlGUI(self)
         self.model_control.set_update_min_time(self.opt.solver_update_time)  # update time from configuration
@@ -206,13 +220,39 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         self.input_notebook_script = wx.Panel(self.input_notebook, wx.ID_ANY)
         self.script_editor = wx.py.editwindow.EditWindow(self.input_notebook_script, wx.ID_ANY)
         self.script_editor.SetBackSpaceUnIndents(True)
+        #appearance = wx.SystemSettings.GetAppearance()
+        #if hasattr(appearance, "IsDark"):
+        #    self.is_dark = appearance.IsDark()
+        # First configure the default style so StyleClearAll can propagate it
+        if self.is_dark:
+            self.script_editor.StyleSetBackground(wx.stc.STC_STYLE_DEFAULT, "#333333")
+            self.script_editor.StyleSetForeground(wx.stc.STC_STYLE_DEFAULT, "#D0D0D0")
+        else:
+            self.script_editor.StyleSetBackground(wx.stc.STC_STYLE_DEFAULT, "#e7e7e7")
+            self.script_editor.StyleSetForeground(wx.stc.STC_STYLE_DEFAULT, "#000000")
+
+        # Copy the default style to all lexer styles so they all share
+        # the same background; we then override selected ones below.
+        self.script_editor.StyleClearAll()
+
+        if self.is_dark:
+            self.script_editor.SetCaretForeground("#FFFFFF")
+            self.script_editor.SetSelBackground(True, "#264F78")
+            # Python lexer token colours for dark mode
+            self.script_editor.StyleSetForeground(wx.stc.STC_P_COMMENTLINE, "#6A9955")
+            self.script_editor.StyleSetForeground(wx.stc.STC_P_STRING, "#CE9178")
+            self.script_editor.StyleSetForeground(wx.stc.STC_P_NUMBER, "#B5CEA8")
+            self.script_editor.StyleSetForeground(wx.stc.STC_P_WORD, "#569CD6")
         self.script_editor.AutoCompSetChooseSingle(True)
         self.script_editor.AutoCompSetIgnoreCase(False)
         self.script_editor.Bind(wx.EVT_KEY_DOWN, self.ScriptEditorKeyEvent)
 
+
         debug("setup of MainFrame - properties and layout")
         self.__set_properties()
         self.__do_layout()
+
+        
 
         debug("setup of MainFrame - bind")
         self.bind_menu()
@@ -301,6 +341,9 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         self.mb_checkables[custom_ids.MenuId.SET_SINGLE].Check(self.opt.single_instance)
         if self.opt.single_instance:
             self.single_instance_activate()
+
+        # React to system theme / colour changes (dark/light mode etc.)
+        self.Bind(wx.EVT_SYS_COLOUR_CHANGED, self.on_sys_colour_changed)
 
         debug("finished setup of MainFrame")
 
@@ -714,6 +757,50 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
             return
         if fpage != tpage and self.input_notebook.GetPageText(fpage) == "Script":
             self.model_control.set_model_script(self.script_editor.GetText())
+
+    def on_sys_colour_changed(self, event):
+        """Handle system colour/theme changes and propagate to subwidgets."""
+        # Determine current dark/light appearance
+        is_dark = False
+        try:
+            appearance = wx.SystemSettings.GetAppearance()
+            if hasattr(appearance, "IsDark"):
+                is_dark = appearance.IsDark()
+        except AttributeError:
+            col = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+            r, g, b = col.Get()
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            is_dark = luminance < 128
+
+        # Store on the main window so child widgets relying on
+        # parent.is_dark (e.g. plugin panels) see the updated value.
+        self.is_dark = is_dark
+
+        # Update parameter grid theme (slider background, text colours, etc.)
+        try:
+            if hasattr(self, "paramter_grid") and self.paramter_grid is not None:
+                self.paramter_grid.update_theme(is_dark)
+        except Exception:
+            debug("Failed to update ParameterGrid theme on system colour change", exc_info=True)
+
+        # Update plotting panels (matplotlib or WX-native) to match theme
+        for panel_attr in ("plot_data", "plot_fom", "plot_pars", "plot_fomscan"):
+            try:
+                panel = getattr(self, panel_attr, None)
+                if panel is not None and hasattr(panel, "update_theme"):
+                    panel.update_theme(is_dark)
+            except Exception:
+                debug(f"Failed to update theme for panel {panel_attr}", exc_info=True)
+
+        # Update any plugin plot panels (e.g. SLD plots in reflectivity plugins)
+        try:
+            if hasattr(self, "plugin_control") and self.plugin_control is not None:
+                self.plugin_control.OnThemeChanged(is_dark)
+        except Exception:
+            debug("Failed to update plugin themes on system colour change", exc_info=True)
+
+        # Let wxWidgets process its own colour updates too
+        event.Skip()
 
     def scan_parameter(self, row):
         """
@@ -2259,6 +2346,7 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         """
         Event handler for only evaluating the Sim function - no recompiling
         """
+        from numpy import isnan
         self.flag_simulating = True
         self.main_frame_statusbar.SetStatusText("Simulating...", 1)
         # Compile is not necessary when using simulate...
@@ -2271,7 +2359,7 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
             data = self.model_control.get_data()
             sims2 = [di.y_sim for di in data]
             _post_sim_plot_event(self, self.model_control.get_model(), "Evaluation")
-            diffs = [(si1 != si2).any() for si1, si2 in zip(sims1, sims2)]
+            diffs = [not ((si1 == si2)|(isnan(si1) & isnan(si2))).all() for si1, si2 in zip(sims1, sims2)]
             if any(diffs):
                 ShowNotificationDialog(
                     self,
@@ -2579,6 +2667,9 @@ class GenxApp(wx.App):
         dc.SelectObject(wx.NullBitmap)
 
     def lazy_imoprts(self):
+        debug('enter lazy_imports')
+        # suppress converter debug messages when importing h5py (indirectly)
+        logging.getLogger('h5py').setLevel(logging.WARNING)
         global custom_ids, datalist, help, parametergrid, pubgraph_dialog, solvergui, BatchDialog, \
             ShowNotificationDialog, ShowQuestionDialog, VersionInfoDialog, check_version
         from . import custom_ids, datalist, help
@@ -2586,6 +2677,7 @@ class GenxApp(wx.App):
         from .batch_dialog import BatchDialog
         from .message_dialogs import ShowNotificationDialog, ShowQuestionDialog
         from .online_update import VersionInfoDialog, check_version
+        debug('leave lazy_imports')
 
     def OnInit(self):
         first_init = self._first_init
@@ -2643,10 +2735,10 @@ class GenxApp(wx.App):
                 numba.jit = real_jit
 
         if self.open_file is None:
-            self.splash.Destroy()
-            if first_init:
+            if first_init and main_frame.wstartup.show_profiles:
+                self.splash.Destroy()
                 main_frame.startup_dialog(config_path)
-            self.ShowSplash()
+                self.WriteSplash = lambda *args, **kwargs: None
         else:
             wx.CallAfter(self.WriteSplash, f"loading file {os.path.basename(self.open_file)}...", progress=0.8)
             if self.open_file.endswith(".ort"):
@@ -2668,7 +2760,8 @@ class GenxApp(wx.App):
         if time.time() - main_frame.opt.last_update_check > (7 * 24 * 3600):
             wx.CallAfter(self.WriteSplash, "checking for update...", progress=0.95)
             wx.CallAfter(main_frame.check_for_update)
-        wx.CallAfter(self.splash.Destroy)
+        if not (first_init and main_frame.wstartup.show_profiles):
+            wx.CallAfter(self.splash.Destroy)
         wx.CallLater(100, main_frame.model_control.SetModelSaved)
         return 1
 

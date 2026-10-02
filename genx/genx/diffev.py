@@ -7,6 +7,7 @@ import pickle
 import random as random_mod
 import threading
 import time
+import pdb, traceback
 
 from dataclasses import dataclass
 from logging import debug
@@ -453,6 +454,8 @@ class DiffEv(GenxOptimizer):
             custom_logging.numpy_set_options()
             self.optimize()
         except Exception as e:
+            print(traceback.print_exc())
+            #pdb.set_trace()
             self.running = False
             self.error = f"An error occured in the model while executing:\n{e!r}"
             debug("An error occured in the model while executing", exc_info=True)
@@ -1375,8 +1378,8 @@ def set_numba_single():
 def parallel_init(pkl_str: str, numba_procs=None, use_mpi=False, overwrite_single=False, log_queue=None):
     """
     parallel initialization of a pool of processes. The function takes a
-    pickle safe copy of the model and resets the script module and the compiles
-    the script and creates function to set the variables.
+    pickle safe copy of the model and resets the script module and then compiles
+    the script and creates a function to set the variables.
     """
     if log_queue:
         custom_logging.setup_mp(log_queue)

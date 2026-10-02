@@ -210,6 +210,22 @@ class Template:
         """
         pass
 
+    def OnThemeChanged(self, is_dark: bool):
+        """Responds to a system theme (dark/light) change.
+
+        Default implementation updates all plugin plot panels that expose an
+        ``update_theme`` method (e.g. matplotlib or WX-native PlotPanel
+        instances) so that plugin plots follow the main application theme.
+        """
+        for panel in getattr(self, "plot_pages", []):
+            try:
+                for child in panel.GetChildren():
+                    if hasattr(child, "update_theme"):
+                        child.update_theme(is_dark)
+            except Exception:
+                # Never let a theming issue in one plugin break others
+                continue
+
     def Remove(self):
         """
         Removes all components.
@@ -469,6 +485,20 @@ class PluginController(Configurable):
         """
         for name in self.plugin_handler.loaded_plugins:
             self.plugin_handler.loaded_plugins[name].OnGridChange(event)
+
+    def OnThemeChanged(self, is_dark: bool):
+        """Propagate system theme changes to all loaded plugins.
+
+        Each plugin can override ``OnThemeChanged`` for custom behaviour,
+        but by default the template implementation will update any child
+        plot panels that expose an ``update_theme`` method.
+        """
+        for name in self.plugin_handler.loaded_plugins:
+            try:
+                self.plugin_handler.loaded_plugins[name].OnThemeChanged(is_dark)
+            except Exception:
+                # Ignore individual plugin failures when changing theme
+                continue
 
     def GetPlugin(self, plugin_name):
         return self.plugin_handler.loaded_plugins[plugin_name]

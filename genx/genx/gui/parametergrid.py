@@ -39,7 +39,6 @@ class ParameterDataTable(gridlib.GridTableBase):
         gridlib.GridTableBase.__init__(self)
         self.parent = parent
         self.pars = parameters.Parameters()
-
         self.data_types = [
             gridlib.GRID_VALUE_STRING,
             gridlib.GRID_VALUE_FLOAT,
@@ -106,10 +105,10 @@ class ParameterDataTable(gridlib.GridTableBase):
     def UpdateView(self):
         delta_length = 1 + self.GetNumberRows() - self.parent.GetNumberRows()
         if delta_length > 0:
-            msg = gridlib.GridTableMessage(self, gridlib.GRIDTABLE_NOTIFY_ROWS_INSERTED, 1, delta_length)
+            msg = gridlib.GridTableMessage(self, gridlib.GRIDTABLE_NOTIFY_ROWS_INSERTED, 0, delta_length)
             self.GetView().ProcessTableMessage(msg)
         elif delta_length < 0:
-            msg = gridlib.GridTableMessage(self, gridlib.GRIDTABLE_NOTIFY_ROWS_DELETED, 1, -delta_length)
+            msg = gridlib.GridTableMessage(self, gridlib.GRIDTABLE_NOTIFY_ROWS_DELETED, 0, -delta_length)
             self.GetView().ProcessTableMessage(msg)
         self.GetView().ForceRefresh()
         self.parent._grid_changed()
@@ -188,7 +187,7 @@ class ParameterDataTable(gridlib.GridTableBase):
         if clear:
             # Start by deleting all rows:
             msg = gridlib.GridTableMessage(
-                self, gridlib.GRIDTABLE_NOTIFY_ROWS_DELETED, self.parent.GetNumberRows(), self.parent.GetNumberRows()
+                self, gridlib.GRIDTABLE_NOTIFY_ROWS_DELETED, 0, self.parent.GetNumberRows()
             )
             self.pars = parameters.Parameters()
             self.GetView().ProcessTableMessage(msg)
@@ -210,7 +209,7 @@ class ParameterDataTable(gridlib.GridTableBase):
             diff_rows = self.GetNumberRows() - self.parent.GetNumberRows() + 1
             if diff_rows < 0:
                 # rows were deleted
-                msg = gridlib.GridTableMessage(self, gridlib.GRIDTABLE_NOTIFY_ROWS_DELETED, 1, abs(diff_rows))
+                msg = gridlib.GridTableMessage(self, gridlib.GRIDTABLE_NOTIFY_ROWS_DELETED, 0, abs(diff_rows))
                 self.GetView().ProcessTableMessage(msg)
             elif diff_rows > 0:
                 # rows were added
@@ -490,9 +489,10 @@ class ValueLimitCellEditor(gridlib.GridCellEditor):
 class ValueLimitCellRenderer(gridlib.GridCellRenderer):
     """Renderer for the Parameter Values. Colours the Cell if the value is out of bounds."""
 
-    def __init__(self, model_ctrl: ModelController, value=0, max_value=100.0, min_value=100):
+    def __init__(self, model_ctrl: ModelController, value=0, max_value=100.0, min_value=100, is_dark: bool = False):
         gridlib.GridCellRenderer.__init__(self)
         self.model_ctrl: ModelController = model_ctrl
+        self.is_dark: bool = is_dark
 
     def Draw(self, grid, attr, dc, rect, row, col, isSelected):
         if grid.GetCellValue(row, col) != "":
@@ -504,13 +504,20 @@ class ValueLimitCellRenderer(gridlib.GridCellRenderer):
                     bkg_colour = wx.Colour(204, 0, 0)
                 else:
                     bkg_colour = wx.Colour(255, 150, 100)
-                txt_colour = wx.Colour(255, 255, 255)
             else:
                 if not isSelected:
                     bkg_colour = attr.GetBackgroundColour()
+                    txt_colour = attr.GetTextColour()
                 else:
                     bkg_colour = grid.GetSelectionBackground()
-                txt_colour = wx.Colour(0, 0, 0)
+                    txt_colour = grid.GetSelectionForeground()
+
+                # For in-bounds values we use the attribute/grid text colour,
+                # which you set up from the OS theme (white in dark mode).
+            if val > max_val or val < min_val:
+                # Out-of-bounds values keep their dedicated warning colours
+                # with white text for maximum contrast on both light/dark.
+                txt_colour = wx.Colour(255, 255, 255)
 
             dc.SetBackgroundMode(wx.SOLID)
             dc.SetBrush(wx.Brush(bkg_colour, wx.SOLID))
@@ -521,8 +528,21 @@ class ValueLimitCellRenderer(gridlib.GridCellRenderer):
             text = "%.7g" % val
 
             if val <= max_val and val >= min_val:
-                # paint a slight indication of rlative value within range
-                dc.SetBrush(wx.Brush(wx.Colour(240, 240, 240), wx.SOLID))
+                # Paint a slight indication of relative value within range.
+                # Now this statement is toggled when user changes dark/light 
+                is_dark = self.is_dark
+                try:
+                    parent = grid.GetParent()
+                    if hasattr(parent, "is_dark"):
+                        is_dark = bool(parent.is_dark)
+                except Exception:
+                    pass
+
+                if is_dark:
+                    slider_colour = wx.Colour(80, 80, 80)
+                else:
+                    slider_colour = wx.Colour(240, 240, 240)
+                dc.SetBrush(wx.Brush(slider_colour, wx.SOLID))
                 if max_val != min_val:
                     rel_value_pix = int(rect.width * (val - min_val) / (max_val - min_val))
                 else:
@@ -547,12 +567,7 @@ class ValueLimitCellRenderer(gridlib.GridCellRenderer):
             dc.DrawRectangle(rect.x, rect.y, rect.width, rect.height)
 
     def Clone(self):
-        return ValueLimitCellRenderer(
-            self.model_ctrl,
-            self.slider_drawer.value,
-            max=self.slider_drawer.max_value,
-            min=self.slider_drawer.min_value,
-        )
+        return ValueLimitCellRenderer(self.model_ctrl, is_dark=self.is_dark)
 
 
 class ValueCellEditor(gridlib.GridCellEditor):
@@ -691,9 +706,10 @@ class ValueCellRenderer(gridlib.GridCellRenderer):
                     bkg_colour = attr.GetBackgroundColour()
                 else:
                     bkg_colour = wx.Colour(150, 150, 150)
+                txt_colour = attr.GetTextColour()
             else:
                 bkg_colour = grid.GetSelectionBackground()
-            txt_colour = wx.Colour(0, 0, 0)
+                txt_colour = grid.GetSelectionForeground()
 
             dc.SetBackgroundMode(wx.SOLID)
             dc.SetBrush(wx.Brush(bkg_colour, wx.SOLID))
@@ -766,6 +782,24 @@ class ParameterGrid(wx.Panel, Configurable):
         self.grid.DisableDragRowSize()
         # self.grid.SetForegroundColour('BLUE')
 
+        # Detecting dark mode
+        is_dark = False
+        try:
+            appearance = wx.SystemSettings.GetAppearance()
+            if hasattr(appearance, "IsDark"):
+                is_dark = appearance.IsDark()
+        except AttributeError:
+            # Fallback: infer from system window colour brightness
+            col = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+            r, g, b = col.Get()
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            is_dark = luminance < 128
+
+        self.is_dark = is_dark
+        if is_dark:
+            fg = wx.Colour(255, 255, 255)
+            self.grid.SetDefaultCellTextColour(fg)
+            self.grid.SetLabelTextColour(fg)
         self.do_toolbar()
 
         self.sizer_hor = wx.BoxSizer(wx.HORIZONTAL)
@@ -818,7 +852,7 @@ class ParameterGrid(wx.Panel, Configurable):
 
         self.toolbar.Realize()
         self.col_attr = gridlib.GridCellAttr()
-        self.col_attr.SetRenderer(ValueLimitCellRenderer(model_ctrl=model_ctrl))
+        self.col_attr.SetRenderer(ValueLimitCellRenderer(model_ctrl=model_ctrl, is_dark=self.is_dark))
         self.SetValueEditorSlider(slider=self.opt.value_slider)
         attr = gridlib.GridCellAttr()
         attr.SetEditor(ValueCellEditor())
@@ -827,6 +861,44 @@ class ParameterGrid(wx.Panel, Configurable):
         self.grid.SetColAttr(3, attr.Clone())
         self.grid.SetColAttr(4, attr)
         self._paste_history = None
+
+    def update_theme(self, is_dark: bool):
+        """Update colours and renderers when system theme changes."""
+        self.is_dark = is_dark
+
+        # Update grid background and text colours according to current theme.
+        # Use system window/text colours so we follow the native toolkit theme,
+        # which is important on Linux where wx may not automatically
+        # re-theme existing controls.
+        try:
+            bg = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+        except Exception:
+            bg = wx.Colour(0, 0, 0) if is_dark else wx.Colour(255, 255, 255)
+
+        try:
+            fg = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT)
+        except Exception:
+            fg = wx.Colour(255, 255, 255) if is_dark else wx.Colour(0, 0, 0)
+
+        # Apply to grid background, default cells and labels
+        self.grid.SetBackgroundColour(bg)
+        self.grid.SetDefaultCellBackgroundColour(bg)
+        self.grid.SetDefaultCellTextColour(fg)
+        self.grid.SetLabelBackgroundColour(bg)
+        self.grid.SetLabelTextColour(fg)
+
+        # Update the in-range slider background renderer to respect dark mode
+        try:
+            col_attr = self.grid.GetColAttr(1)
+            if col_attr is not None:
+                renderer = col_attr.GetRenderer()
+                if isinstance(renderer, ValueLimitCellRenderer):
+                    renderer.is_dark = is_dark
+        except Exception:
+            # Non-fatal: theme update should not crash the app
+            pass
+
+        self.grid.ForceRefresh()
 
     def PrepareNewModel(self):
         """Hack to prepare the grid for a new model."""
