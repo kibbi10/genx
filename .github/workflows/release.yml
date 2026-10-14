@@ -43,7 +43,7 @@ jobs:
         pyinstaller genx.spec
     - name: Download and Install Inno Setup installer
       run: |
-        curl -L -o installer.exe http://files.jrsoftware.org/is/6/innosetup-6.1.2.exe
+        curl -L -o installer.exe https://github.com/jrsoftware/issrc/releases/download/is-6_7_1/innosetup-6.7.1.exe
         ./installer.exe /verysilent /allusers /dir=inst
     - name: Build setup file
       run: |
@@ -158,10 +158,10 @@ jobs:
     - name: Install dependencies
       run: |
         brew install libomp
-        python3 -m pip install bumps orsopy pyinstaller pyinstaller-hooks-contrib pyyaml
+        python3 -m pip install "bumps==1.0.3" orsopy pyinstaller pyinstaller-hooks-contrib pyyaml
         python3 -m pip install numpy scipy matplotlib
         python3 -m pip install platformdirs h5py pymysql numba==0.62.1 requests svgwrite pint docutils
-        python3 -m pip install wxpython
+        python3 -m pip install "wxpython<4.3.0"
         python3 -m pip install vtk
         python3 -m pip list
     - name: Build with pyinstaller
@@ -253,10 +253,10 @@ jobs:
     - name: Install dependencies
       run: |
         brew install libomp
-        python3 -m pip install bumps orsopy pyinstaller pyinstaller-hooks-contrib pyyaml
+        python3 -m pip install "bumps==1.0.3" orsopy pyinstaller pyinstaller-hooks-contrib pyyaml
         python3 -m pip install numpy scipy matplotlib
         python3 -m pip install platformdirs h5py pymysql numba requests svgwrite pint docutils
-        python3 -m pip install wxpython
+        python3 -m pip install "wxpython<4.3.0"
         python3 -m pip install vtk
         python3 -m pip list
     - name: Build with pyinstaller
