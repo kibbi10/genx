@@ -6,6 +6,7 @@ import warnings
 
 from dataclasses import dataclass
 from logging import ERROR, debug, getLogger
+from pathlib import Path
 from typing import Type
 
 import matplotlib
@@ -57,6 +58,48 @@ class BasePlotConfig(BaseConfig):
     y_scale: str = "linear"
 
 
+class CompactNavigationToolbar(NavigationToolbar):
+    """Matplotlib navigation with icons sized in logical display units."""
+
+    ICON_SIZE_DIP = 24
+
+    @classmethod
+    def _icon(cls, name, is_dark=None):
+        # The default wx backend uses the OS toolbar art-provider size for
+        # these bundles. Changing SetToolBitmapSize alone does not reliably
+        # override that preferred size on macOS. Give the SVG bundle itself
+        # the compact logical size; wx renders the Retina resolution as needed.
+        path = Path(matplotlib.get_data_path()) / "images" / name
+        if path.suffix != ".svg":
+            return super()._icon(name)
+        svg = path.read_bytes()
+        if is_dark is None:
+            is_dark = wx.SystemSettings.GetAppearance().IsDark()
+        if is_dark:
+            svg = svg.replace(b"fill:black;", b"fill:white;")
+        return wx.BitmapBundle.FromSVG(svg, wx.Size(cls.ICON_SIZE_DIP, cls.ICON_SIZE_DIP))
+
+    def update_theme(self, is_dark):
+        """Replace cached icon bundles without recreating navigation state."""
+        for text, tooltip, image_file, callback in self.toolitems:
+            if text is None or text not in self.wx_ids:
+                continue
+            tool_id = self.wx_ids[text]
+            self.SetToolNormalBitmap(tool_id, self._icon(f"{image_file}.svg", is_dark=is_dark))
+            # Let wx regenerate disabled artwork from the new normal bitmap.
+            self.SetToolDisabledBitmap(tool_id, wx.NullBitmap)
+        self.Realize()
+        self.Refresh()
+
+    def Realize(self):
+        # Matplotlib sets its own bitmap size on macOS during construction.
+        # Apply our logical size immediately before realization (including the
+        # call from its constructor), without multiplying by the Retina scale.
+        # Keep Matplotlib's bitmap bundles so wx can select sharp HiDPI images.
+        self.SetToolBitmapSize(self.FromDIP(wx.Size(self.ICON_SIZE_DIP, self.ICON_SIZE_DIP)))
+        return super().Realize()
+
+
 # ==============================================================================
 class PlotPanel(wx.Panel, Configurable):
     """
@@ -91,8 +134,7 @@ class PlotPanel(wx.Panel, Configurable):
         self.canvas = FigureCanvasWxAgg(self, -1, self.figure)
         self.canvas.SetExtraStyle(wx.EXPAND)
         debug("init PlotPanel - setup toolbar")
-        self.toolbar = NavigationToolbar(self.canvas)
-        self.toolbar.Realize()
+        self.toolbar = CompactNavigationToolbar(self.canvas)
 
         self.SetColor(color)
         self.print_size = (15.0 / 2.54, 12.0 / 2.54)
@@ -190,6 +232,7 @@ class PlotPanel(wx.Panel, Configurable):
 
         # Optionally tint the toolbar to match theme
         try:
+            self.toolbar.update_theme(is_dark)
             if is_dark:
                 self.toolbar.SetBackgroundColour(wx.Colour(30, 30, 30))
                 self.toolbar.SetForegroundColour(wx.Colour(230, 230, 230))
