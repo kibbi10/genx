@@ -2682,6 +2682,12 @@ class GenxApp(wx.App):
     def OnInit(self):
         first_init = self._first_init
         if first_init:
+            # wxMSW stays light unless the application explicitly opts in.
+            # This must precede even the splash window. Older wxPython builds
+            # do not expose native Windows dark-mode support.
+            if wx.Platform == "__WXMSW__" and hasattr(self, "SetAppearance"):
+                result = self.SetAppearance(wx.PyApp.Appearance.System)
+                debug("Windows system appearance opt-in: %s", result)
             locale = wx.Locale(wx.LANGUAGE_ENGLISH_US)
             self.locale = locale
             self._first_init = False
