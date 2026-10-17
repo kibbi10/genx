@@ -3,24 +3,33 @@
 
 block_cipher = None
 import os
+from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 from glob import glob
-genx_modules = [si[:-3].replace('/', '.') for si in glob('genx/plugins/*/*.py')]
-genx_modules += [si[:-3].replace('/', '.') for si in glob('genx/plugins/*/help_modules/*.py')]
-genx_modules += [si[:-3].replace('/', '.') for si in glob('genx/models/*.py')]
+# Source discovery must not depend on the directory pyinstaller is run from.
+spec_dir = Path(SPECPATH).resolve()
+genx_modules = [
+    '.'.join(path.relative_to(spec_dir).with_suffix('').parts)
+    for pattern in ('genx/plugins/*/*.py', 'genx/plugins/*/help_modules/*.py', 'genx/models/*.py')
+    for path in sorted(spec_dir.glob(pattern))
+    if path.name != '__init__.py'
+]
+
 genx_modules += ['genx.gui.plotpanel', 'genx.gui.plotpanel_wx']
 
 libomp_path = glob("/opt/homebrew/Cellar/libomp/*/lib/libomp.dylib")[0]
+#libomp_path = glob("/opt/homebrew/Cellar/libomp/*/lib/libomp.dylib")
 
-a = Analysis(['scripts/genx_mac'],
-             pathex=[os.path.abspath(os.path.curdir)],
+a = Analysis([str(spec_dir / 'scripts/genx_mac')],
+             pathex=[str(spec_dir)],
              binaries=[("/opt/homebrew/Cellar/llvm@15/15.0.7/lib/c++/libc++.1.dylib", "."),
                        (libomp_path, ".")],
-             datas=[('genx', 'genx_source/genx'),
-                    ('mac_build/genx.icns', '.'),
-                    ('mac_build/orso.icns', '.')],
+             datas=[(str(spec_dir / 'genx'), 'genx_source/genx'),
+                    (str(spec_dir / 'mac_build/genx.icns'), '.'),
+                    (str(spec_dir / 'mac_build/orso.icns'), '.')],
              hiddenimports= genx_modules+[
-                 'numpy', 'pymysql', 'numba', 'requests', 'bumps.dream.util',
+                 'numpy', 'pymysql', 'numba', 'requests', 'platformdirs', 'logging.handlers',
+		 'wx','wx.grid', 'bumps.dream.util',
                  'scipy._lib.array_api_compat.numpy.fft', 'scipy.special._special_ufuncs',
                  'scipy.special.cython_special', 'xml.dom.minidom',
                  'vtk', 'vtkmodules', 'vtkmodules.all', 'vtkmodules.util.colors',
@@ -31,13 +40,20 @@ a = Analysis(['scripts/genx_mac'],
                      filter=lambda name: not name.startswith('h5py.tests')
                   ) + collect_submodules('docutils.parsers'),
              hookspath=[],
-             hooksconfig={},
+             hooksconfig={"matplotlib": {"backends": "WxAgg"}},
              runtime_hooks=[],
              excludes=[],
              win_no_prefer_redirects=False,
              win_private_assemblies=False,
              cipher=block_cipher,
              noarchive=False)
+# Fail early if analysis did not see the application entry point and GUI.
+# Copying source as data below does not collect its third-party dependencies.
+analysed_modules = {module[0] for module in a.pure}
+for required in ('genx.run', 'genx.gui.main_window'):
+    if required not in analysed_modules:
+        raise RuntimeError(f"PyInstaller failed to analyse {required}; check pathex and the build environment")
+
 # remove genx modules from distribution to make sure to import from genx_source folder on execution
 a.pure = [pi for pi in a.pure if not pi[0].startswith('genx')]
 pyz = PYZ(a.pure, a.zipped_data,
@@ -56,7 +72,7 @@ exe = EXE(pyz,
           disable_windowed_traceback=False,
           target_arch=None,
           codesign_identity=None,
-          entitlements_file=None , icon='mac_build/genx.icns')
+          entitlements_file=None , icon=str(spec_dir / 'mac_build/genx.icns'))
 coll = COLLECT(exe,
                a.binaries,
                a.zipfiles,
@@ -67,7 +83,7 @@ coll = COLLECT(exe,
                name='genx')
 app = BUNDLE(coll,
              name='genx.app',
-             icon='mac_build/genx.icns',
+             icon=str(spec_dir / 'mac_build/genx.icns'),
              bundle_identifier='com.isa.genx',
              info_plist={
              'NSPrincipalClass': 'NSApplication',
