@@ -7,6 +7,7 @@ import pickle
 import random as random_mod
 import threading
 import time
+import pdb, traceback
 
 from dataclasses import dataclass
 from logging import debug
@@ -453,6 +454,8 @@ class DiffEv(GenxOptimizer):
             custom_logging.numpy_set_options()
             self.optimize()
         except Exception as e:
+            print(traceback.print_exc())
+            #pdb.set_trace()
             self.running = False
             self.error = f"An error occured in the model while executing:\n{e!r}"
             debug("An error occured in the model while executing", exc_info=True)

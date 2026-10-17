@@ -2,7 +2,7 @@
 Help class for the Reflectivity plugin to analyze and change the script.
 """
 
-import re
+import re, pdb
 
 from genx.models.lib.refl_base import ReflBase
 
@@ -18,10 +18,24 @@ def default_html_decorator(name, str):
 class SampleHandler:
     model: ReflectivityModule
 
-    def __init__(self, sample, names):
+    def __init__(self, sample, names, is_dark: bool = False):
         self.sample = sample
         self.names = names
+        # Theme flag and colours used when generating HTML output
+        self.set_theme(is_dark)
+
+        # Initialise position list
         self.getStringList()
+
+    def set_theme(self, is_dark: bool):
+        """Update theme-dependent colours used for HTML rendering."""
+        self.is_dark = is_dark
+        if is_dark:
+            self.standardColor = "white"
+            self.stackColor = "#8FB6E1"
+        else:
+            self.standardColor = "black"
+            self.stackColor = "BLUE"
 
     def set_model(self, model: ReflectivityModule):
         self.model = model
@@ -56,7 +70,7 @@ class SampleHandler:
             if slist[item][0] == "L" and item != 0 and item != len(slist) - 1:
                 if html_encoding:
                     slist[item] = (
-                        "<code>&nbsp;&nbsp;&nbsp;<b>" + name + "</b> = " + html_decorator(name, par_str) + "</code>"
+                        "<font color='"+self.standardColor+"'><code>&nbsp;&nbsp;&nbsp;<b>" + name + "</b> = " + html_decorator(name, par_str) + "</code></font>"
                     )
                 else:
                     slist[item] = self.names[-item - 1] + " = model." + slist[item]
@@ -64,14 +78,14 @@ class SampleHandler:
                 if item == 0 or item == len(slist) - 1:
                     # This is then the ambient or substrates
                     if html_encoding:
-                        slist[item] = "<code><b>" + name + "</b> = " + html_decorator(name, par_str) + "</code>"
+                        slist[item] = "<font color='"+self.standardColor+"'><code><b>" + name + "</b> = " + html_decorator(name, par_str) + "</code></font>"
                     else:
                         slist[item] = self.names[-item - 1] + " = model." + slist[item]
                 else:
                     # This is a stack!
                     if html_encoding:
                         slist[item] = (
-                            '<font color = "BLUE"><code><b>'
+                            '<font color = '+self.stackColor+'><code><b>'
                             + name
                             + "</b> = "
                             + html_decorator(name, par_str)
@@ -116,7 +130,7 @@ class SampleHandler:
             if slist[item][0] == "L" and item != 0 and item != len(slist) - 1:
                 if html_encoding:
                     slist[item] = (
-                        "<code>&nbsp;&nbsp;&nbsp;<b>" + name + "</b> = " + html_decorator(name, par_str) + "</code>"
+                        "<code style='color:green;'>&nbsp;&nbsp;&nbsp;<b>" + name + "</b> = " + html_decorator(name, par_str) + "</code>"
                     )
                 else:
                     slist[item] = self.names[-item - 1] + " = model." + slist[item]
@@ -130,13 +144,22 @@ class SampleHandler:
                 else:
                     # This is a stack!
                     if html_encoding:
-                        slist[item] = (
-                            '<font color = "BLUE"><code><b>'
-                            + name
-                            + "</b> = "
-                            + html_decorator(name, par_str)
-                            + "</code></font>"
-                        )
+                        if self.is_dark:
+                            slist[item] = (
+                                '<font color = "RED"><code><b>'
+                                + name
+                                + "</b> = "
+                                + html_decorator(name, par_str)
+                                + "</code></font>"
+                            )
+                        else:
+                            slist[item] = (
+                                '<font color = "BLUE"><b>'
+                                + name
+                                + "</b> = "
+                                + html_decorator(name, par_str)
+                                + "</code></font>"
+                            )
                     else:
                         slist[item] = self.names[-item - 1] + " = model." + slist[item]
         poslist.append((None, None))

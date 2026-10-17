@@ -94,6 +94,7 @@ class WindowStartup(conf_mod.BaseConfig):
     show_profiles: bool = True
     widescreen: bool = False
     wx_plotting: bool = False
+    theme: str = "system"
 
 
 class ORSOFileDialogHook(wx.FileDialogCustomizeHook):
@@ -160,6 +161,20 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         self.dpi_scale_factor = dpi_scale_factor
         wx.GetApp().dpi_scale_factor = dpi_scale_factor
 
+
+        # Detect initial dark/light appearance so child widgets (e.g. plugins)
+        # can query self.is_dark during construction.
+        self.is_dark = False
+        try:
+            appearance = wx.SystemSettings.GetAppearance()
+            if hasattr(appearance, "IsDark"):
+                self.is_dark = appearance.IsDark()
+        except AttributeError:
+            col = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+            r, g, b = col.Get()
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            self.is_dark = luminance < 128
+        
         # GenX objects
         self.model_control = solvergui.ModelControlGUI(self)
         self.model_control.set_update_min_time(self.opt.solver_update_time)  # update time from configuration
@@ -206,13 +221,17 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         self.input_notebook_script = wx.Panel(self.input_notebook, wx.ID_ANY)
         self.script_editor = wx.py.editwindow.EditWindow(self.input_notebook_script, wx.ID_ANY)
         self.script_editor.SetBackSpaceUnIndents(True)
+        self.update_script_theme(self.is_dark)
         self.script_editor.AutoCompSetChooseSingle(True)
         self.script_editor.AutoCompSetIgnoreCase(False)
         self.script_editor.Bind(wx.EVT_KEY_DOWN, self.ScriptEditorKeyEvent)
 
+
         debug("setup of MainFrame - properties and layout")
         self.__set_properties()
         self.__do_layout()
+
+        
 
         debug("setup of MainFrame - bind")
         self.bind_menu()
@@ -301,6 +320,9 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         self.mb_checkables[custom_ids.MenuId.SET_SINGLE].Check(self.opt.single_instance)
         if self.opt.single_instance:
             self.single_instance_activate()
+
+        # React to system theme / colour changes (dark/light mode etc.)
+        self.Bind(wx.EVT_SYS_COLOUR_CHANGED, self.on_sys_colour_changed)
 
         debug("finished setup of MainFrame")
 
@@ -475,6 +497,14 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
         mb_set.AppendSeparator()
         mb_set.Append(custom_ids.MenuId.SET_PROFILE, "Startup Profile...", "")
         mb_set.Append(custom_ids.MenuId.SET_EDITOR, "Select External Editor...", "")
+        theme_menu = wx.Menu()
+        self.theme_items = {}
+        for theme, label in (("light", "Light"), ("dark", "Dark"), ("system", "System")):
+            item = theme_menu.AppendRadioItem(wx.ID_ANY, label)
+            self.theme_items[theme] = item
+            self.Bind(wx.EVT_MENU, lambda event, value=theme: self.on_theme_selected(value), id=item.GetId())
+        self.theme_items[wx.GetApp().theme_preference].Check(True)
+        mb_set.AppendSubMenu(theme_menu, "Theme")
         self.mb_checkables[custom_ids.MenuId.SET_SINGLE] = mb_set.Append(
             custom_ids.MenuId.SET_SINGLE,
             "Single Instance",
@@ -714,6 +744,96 @@ class GenxMainWindow(wx.Frame, conf_mod.Configurable):
             return
         if fpage != tpage and self.input_notebook.GetPageText(fpage) == "Script":
             self.model_control.set_model_script(self.script_editor.GetText())
+
+    def on_theme_selected(self, theme):
+        app = wx.GetApp()
+        if theme == app.theme_preference:
+            return
+        if not hasattr(app, "SetAppearance"):
+            self.theme_items[app.theme_preference].Check(True)
+            ShowWarningDialog(self, "Selecting a theme requires wxPython 4.3.2 or newer.")
+            return
+        result = app.SetAppearance(getattr(wx.PyApp.Appearance, theme.capitalize()))
+        if result == wx.PyApp.AppearanceResult.Failure:
+            self.theme_items[app.theme_preference].Check(True)
+            ShowWarningDialog(self, "The selected theme is not supported by this system.")
+            return
+        app.theme_preference = theme
+        self.wstartup.theme = theme
+        conf_mod.config.default_set("startup", "theme", theme)
+        conf_mod.config.write_default(os.path.join(config_path, "genx.conf"))
+        if result == wx.PyApp.AppearanceResult.CannotChange:
+            ShowNotificationDialog(self, "Your theme preference has been saved. Restart GenX to apply it.")
+            return
+        wx.CallAfter(self.update_theme)
+
+    def on_sys_colour_changed(self, event):
+        """Allow native controls to update before recolouring custom widgets."""
+        event.Skip()
+        wx.CallAfter(self.update_theme)
+
+    def update_theme(self):
+        """Propagate the actual application appearance to custom widgets."""
+        # Determine current dark/light appearance
+        is_dark = False
+        try:
+            appearance = wx.SystemSettings.GetAppearance()
+            if hasattr(appearance, "IsDark"):
+                is_dark = appearance.IsDark()
+        except AttributeError:
+            col = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+            r, g, b = col.Get()
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            is_dark = luminance < 128
+
+        # Store on the main window so child widgets relying on
+        # parent.is_dark (e.g. plugin panels) see the updated value.
+        self.is_dark = is_dark
+        self.update_script_theme(is_dark)
+
+        # Update parameter grid theme (slider background, text colours, etc.)
+        try:
+            if hasattr(self, "paramter_grid") and self.paramter_grid is not None:
+                self.paramter_grid.update_theme(is_dark)
+        except Exception:
+            debug("Failed to update ParameterGrid theme on system colour change", exc_info=True)
+
+        # Update plotting panels (matplotlib or WX-native) to match theme
+        for panel_attr in ("plot_data", "plot_fom", "plot_pars", "plot_fomscan"):
+            try:
+                panel = getattr(self, panel_attr, None)
+                if panel is not None and hasattr(panel, "update_theme"):
+                    panel.update_theme(is_dark)
+            except Exception:
+                debug(f"Failed to update theme for panel {panel_attr}", exc_info=True)
+
+        # Update any plugin plot panels (e.g. SLD plots in reflectivity plugins)
+        try:
+            if hasattr(self, "plugin_control") and self.plugin_control is not None:
+                self.plugin_control.OnThemeChanged(is_dark)
+        except Exception:
+            debug("Failed to update plugin themes on system colour change", exc_info=True)
+
+        self.Refresh()
+
+    def update_script_theme(self, is_dark):
+        editor = self.script_editor
+        bg, fg = ("#333333", "#D0D0D0") if is_dark else ("#e7e7e7", "#000000")
+        # Change colours only: keep lexer fonts, sizing and editor contents.
+        for style in range(wx.stc.STC_STYLE_MAX + 1):
+            editor.StyleSetBackground(style, bg)
+            editor.StyleSetForeground(style, fg)
+        editor.SetCaretForeground("#FFFFFF" if is_dark else "#000000")
+        editor.SetSelBackground(True, "#264F78" if is_dark else "#ADD6FF")
+        colours = {
+            wx.stc.STC_P_COMMENTLINE: "#6A9955" if is_dark else "#008000",
+            wx.stc.STC_P_STRING: "#CE9178" if is_dark else "#A31515",
+            wx.stc.STC_P_NUMBER: "#B5CEA8" if is_dark else "#098658",
+            wx.stc.STC_P_WORD: "#569CD6" if is_dark else "#0000FF",
+        }
+        for style, colour in colours.items():
+            editor.StyleSetForeground(style, colour)
+        editor.Refresh()
 
     def scan_parameter(self, row):
         """
@@ -2584,17 +2704,28 @@ class GenxApp(wx.App):
         # suppress converter debug messages when importing h5py (indirectly)
         logging.getLogger('h5py').setLevel(logging.WARNING)
         global custom_ids, datalist, help, parametergrid, pubgraph_dialog, solvergui, BatchDialog, \
-            ShowNotificationDialog, ShowQuestionDialog, VersionInfoDialog, check_version
+            ShowNotificationDialog, ShowQuestionDialog, ShowWarningDialog, VersionInfoDialog, check_version
         from . import custom_ids, datalist, help
         from . import parametergrid, pubgraph_dialog, solvergui
         from .batch_dialog import BatchDialog
-        from .message_dialogs import ShowNotificationDialog, ShowQuestionDialog
+        from .message_dialogs import ShowNotificationDialog, ShowQuestionDialog, ShowWarningDialog
         from .online_update import VersionInfoDialog, check_version
         debug('leave lazy_imports')
 
     def OnInit(self):
         first_init = self._first_init
         if first_init:
+            # wxMSW stays light unless the application explicitly opts in.
+            # This must precede even the splash window. Older wxPython builds
+            # do not expose native Windows dark-mode support.
+            conf_mod.config.load_default(os.path.join(config_path, "genx.conf"))
+            self.theme_preference = conf_mod.config.default_config.get("startup", "theme", fallback="system")
+            if self.theme_preference not in ("light", "dark", "system"):
+                self.theme_preference = "system"
+            if hasattr(self, "SetAppearance"):
+                appearance = getattr(wx.PyApp.Appearance, self.theme_preference.capitalize())
+                result = self.SetAppearance(appearance)
+                info("Application theme %s: %s", self.theme_preference, result)
             locale = wx.Locale(wx.LANGUAGE_ENGLISH_US)
             self.locale = locale
             self._first_init = False

@@ -1110,8 +1110,10 @@ class FitSelectorCombo(wx.ComboCtrl):
     def __init__(self, state, *args, **kw):
         """
 
-        :param state: an int signalling the state 0 - parameter defined in dialog,
-            1 - parameter fitted, 2 - parameter constant in grid.
+        :param state: an int signalling the state 
+            0 - parameter defined in dialog,
+            1 - parameter fitted, 
+            2 - parameter constant in grid.
         :param args:
         :param kw:
         :return:

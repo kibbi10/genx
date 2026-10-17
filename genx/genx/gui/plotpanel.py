@@ -6,6 +6,7 @@ import warnings
 
 from dataclasses import dataclass
 from logging import ERROR, debug, getLogger
+from pathlib import Path
 from typing import Type
 
 import matplotlib
@@ -21,6 +22,7 @@ from numpy import arange, array, c_, floor, hstack, isfinite, ma, newaxis, sign
 from wx import LANDSCAPE, PAPER_A4
 
 from ..core.config import BaseConfig, Configurable
+from ..core.mpl_config import apply_genx_mpl_style
 from ..data import DataList
 from ..model import Model
 from .custom_events import plot_position, skips_event, state_changed
@@ -30,6 +32,9 @@ getLogger("matplotlib.ticker").setLevel(ERROR)
 getLogger("matplotlib.font_manager").setLevel(ERROR)
 
 zoom_state = False
+
+# Apply a consistent matplotlib style (including dark-mode colours) once
+apply_genx_mpl_style()
 
 
 # fix a bug in wx/matplotlib where keeping a motion event reference breaks scrolling
@@ -51,6 +56,48 @@ class BasePlotConfig(BaseConfig):
     autoscale: bool = True
     x_scale: str = "linear"
     y_scale: str = "linear"
+
+
+class CompactNavigationToolbar(NavigationToolbar):
+    """Matplotlib navigation with icons sized in logical display units."""
+
+    ICON_SIZE_DIP = 24
+
+    @classmethod
+    def _icon(cls, name, is_dark=None):
+        # The default wx backend uses the OS toolbar art-provider size for
+        # these bundles. Changing SetToolBitmapSize alone does not reliably
+        # override that preferred size on macOS. Give the SVG bundle itself
+        # the compact logical size; wx renders the Retina resolution as needed.
+        path = Path(matplotlib.get_data_path()) / "images" / name
+        if path.suffix != ".svg":
+            return super()._icon(name)
+        svg = path.read_bytes()
+        if is_dark is None:
+            is_dark = wx.SystemSettings.GetAppearance().IsDark()
+        if is_dark:
+            svg = svg.replace(b"fill:black;", b"fill:white;")
+        return wx.BitmapBundle.FromSVG(svg, wx.Size(cls.ICON_SIZE_DIP, cls.ICON_SIZE_DIP))
+
+    def update_theme(self, is_dark):
+        """Replace cached icon bundles without recreating navigation state."""
+        for text, tooltip, image_file, callback in self.toolitems:
+            if text is None or text not in self.wx_ids:
+                continue
+            tool_id = self.wx_ids[text]
+            self.SetToolNormalBitmap(tool_id, self._icon(f"{image_file}.svg", is_dark=is_dark))
+            # Let wx regenerate disabled artwork from the new normal bitmap.
+            self.SetToolDisabledBitmap(tool_id, wx.NullBitmap)
+        self.Realize()
+        self.Refresh()
+
+    def Realize(self):
+        # Matplotlib sets its own bitmap size on macOS during construction.
+        # Apply our logical size immediately before realization (including the
+        # call from its constructor), without multiplying by the Retina scale.
+        # Keep Matplotlib's bitmap bundles so wx can select sharp HiDPI images.
+        self.SetToolBitmapSize(self.FromDIP(wx.Size(self.ICON_SIZE_DIP, self.ICON_SIZE_DIP)))
+        return super().Realize()
 
 
 # ==============================================================================
@@ -87,8 +134,7 @@ class PlotPanel(wx.Panel, Configurable):
         self.canvas = FigureCanvasWxAgg(self, -1, self.figure)
         self.canvas.SetExtraStyle(wx.EXPAND)
         debug("init PlotPanel - setup toolbar")
-        self.toolbar = NavigationToolbar(self.canvas)
-        self.toolbar.Realize()
+        self.toolbar = CompactNavigationToolbar(self.canvas)
 
         self.SetColor(color)
         self.print_size = (15.0 / 2.54, 12.0 / 2.54)
@@ -125,6 +171,83 @@ class PlotPanel(wx.Panel, Configurable):
         # Init printout stuff
         self.fig_printer = FigurePrinter(self)
         debug("end init PlotPanel")
+
+    def update_theme(self, is_dark: bool):
+        """Update matplotlib theme and background when system theme changes."""
+        # Reapply GenX matplotlib style for the new theme
+        apply_genx_mpl_style(is_dark=is_dark)
+
+        # Update figure and axes colours from the new rcParams
+        try:
+            # Figure background
+            self.figure.set_facecolor(matplotlib.rcParams.get("figure.facecolor", "white"))
+
+            # Axes and text colours
+            for ax in list(self.figure.axes):
+                try:
+                    ax.set_facecolor(matplotlib.rcParams.get("axes.facecolor", "white"))
+                    # Spines
+                    edge_col = matplotlib.rcParams.get("axes.edgecolor", "black")
+                    for spine in ax.spines.values():
+                        spine.set_color(edge_col)
+                    # Tick colours
+                    x_tick_col = matplotlib.rcParams.get("xtick.color", "black")
+                    y_tick_col = matplotlib.rcParams.get("ytick.color", "black")
+                    ax.tick_params(axis="x", colors=x_tick_col)
+                    ax.tick_params(axis="y", colors=y_tick_col)
+                    # Axis labels and title
+                    label_col = matplotlib.rcParams.get("axes.labelcolor", "black")
+                    ax.xaxis.label.set_color(label_col)
+                    ax.yaxis.label.set_color(label_col)
+                    ax.title.set_color(matplotlib.rcParams.get("text.color", label_col))
+                    # Legend (if any)
+                    leg = ax.get_legend()
+                    if leg is not None:
+                        for text in leg.get_texts():
+                            text.set_color(matplotlib.rcParams.get("text.color", label_col))
+                        frame = leg.get_frame()
+                        frame.set_facecolor(matplotlib.rcParams.get("axes.facecolor", "white"))
+                        frame.set_edgecolor(matplotlib.rcParams.get("axes.edgecolor", "black"))
+                    # Grid colour / style (detect if any gridlines are visible)
+                    gridlines = ax.get_xgridlines() + ax.get_ygridlines()
+                    if any(gl.get_visible() for gl in gridlines):
+                        ax.grid(
+                            True,
+                            color=matplotlib.rcParams.get("grid.color", "lightgray"),
+                            linestyle=matplotlib.rcParams.get("grid.linestyle", "--"),
+                        )
+                except Exception:
+                    # Do not let one problematic axes prevent others updating
+                    continue
+        except Exception:
+            pass
+
+        # Sync canvas background roughly with figure background
+        try:
+            fig_bg = self.figure.get_facecolor()
+            rgb = tuple(int(255 * c) for c in fig_bg[:3])
+            self.canvas.SetBackgroundColour(wx.Colour(*rgb))
+        except Exception:
+            pass
+
+        # Optionally tint the toolbar to match theme
+        try:
+            self.toolbar.update_theme(is_dark)
+            if is_dark:
+                self.toolbar.SetBackgroundColour(wx.Colour(30, 30, 30))
+                self.toolbar.SetForegroundColour(wx.Colour(230, 230, 230))
+            else:
+                self.toolbar.SetBackgroundColour(wx.NullColour)
+                self.toolbar.SetForegroundColour(wx.NullColour)
+            self.toolbar.Refresh()
+        except Exception:
+            pass
+
+        # Redraw current content (if any) with new colours
+        try:
+            self.flush_plot()
+        except Exception:
+            pass
 
     def OnMPLButton(self, event):
         if self.toolbar.mode.name!='NONE':
@@ -1001,9 +1124,12 @@ class DataPlotPanel(PlotPanel):
 
             gs = GridSpec(4, 1)
         self.ax = self.figure.add_subplot(gs[:3, 0])
-        # self.ax.xaxis.set_visible(False)
-        self.ax.get_xaxis().set_visible(False)
-        # setp(self.ax.get_xticklabels(), visible=False)
+        # Hide duplicate x tick labels on the main axes but keep the
+        # x-axis itself enabled so vertical gridlines remain visible.
+        #try:
+        self.ax.tick_params(axis="x", which="both", labelbottom=False)
+        #except Exception:
+        #    pass
         self.error_ax = self.figure.add_subplot(gs[3, 0], sharex=self.ax)
         # self.error_ax = self.figure.add_axes(self.sub_ax_rect, sharex=self.ax)
         self.ax.set_autoscale_on(False)

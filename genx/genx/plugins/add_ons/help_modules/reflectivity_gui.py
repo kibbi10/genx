@@ -296,6 +296,7 @@ class ReflClassEditor:
 
 
 class SamplePanel(wx.Panel):
+    
     sampleh: SampleHandler
     model: ReflectivityModule
 
@@ -307,11 +308,20 @@ class SamplePanel(wx.Panel):
         self.plugin = plugin
         self.variable_span = 0.25
 
+        # Check if dark mode is active
+        self.is_dark = getattr(self.plugin.parent, 'is_dark', False)
         # Colours indicating different states
         # Green wx.Colour(138, 226, 52), ORANGE wx.Colour(245, 121, 0)
-        self.fit_colour = (245, 121, 0)
-        # Tango Sky blue wx.Colour(52, 101, 164), wx.Colour(114, 159, 207)
-        self.const_fit_colour = (114, 159, 207)
+        
+        if self.is_dark:
+            self.fit_colour = (204, 96, 0)
+            self.const_fit_colour = (78, 121, 167)
+        else:
+            self.fit_colour = (245, 121, 0)
+            # Tango Sky blue wx.Colour(52, 101, 164), wx.Colour(114, 159, 207)
+            self.const_fit_colour = (114, 159, 207)
+        
+        
 
         boxver = wx.BoxSizer(wx.HORIZONTAL)
         boxhor = wx.BoxSizer(wx.VERTICAL)
@@ -328,6 +338,9 @@ class SamplePanel(wx.Panel):
         self.SetSizer(boxver)
         self.toolbar.Realize()
         self.update_callback = lambda event: ""
+
+        # Apply colors to the tab
+        self.updateTheme(self.is_dark)
 
     def do_toolbar(self):
         dpi_scale_factor = wx.GetApp().dpi_scale_factor
@@ -437,6 +450,7 @@ class SamplePanel(wx.Panel):
                 )
         fit_color_str = "rgb(%d,%d,%d)" % self.fit_colour
         const_fit_color_str = "rgb(%d,%d,%d)" % self.const_fit_colour
+        base_text_color = "rgb(230,230,230)" if self.is_dark else "rgb(0,0,0)"
 
         def decorator(name, str):
             """Decorator to indicate the parameters that are fitted"""
@@ -449,7 +463,7 @@ class SamplePanel(wx.Panel):
                 par_name = par_str.split("=")[0].strip()
                 # par_name normal parameter (real number)
                 if (name, par_name) in dic_lookup:
-                    val, state = dic_lookup[(name, par_name)]
+                    val, state = dic_lookup[(name, par_name)]   
                     if state == 1:
                         par_str = " <font color=%s><b>%s=%.2e</b></font>," % (fit_color_str, par_name, val)
                     elif state == 2:
@@ -481,6 +495,8 @@ class SamplePanel(wx.Panel):
                 ret_str = ret_str[:-1]
             if str[-1] == ")" and ret_str[-1] != ")":
                 ret_str += ")"
+            # Apply base text colour so non-highlighted text is readable
+            ret_str = '<font color="%s">%s</font>' % (base_text_color, ret_str)
             return ret_str
 
         return decorator
@@ -1152,6 +1168,52 @@ class SamplePanel(wx.Panel):
             self.sampleh.sample = self.plugin.GetModel().script_module.sample
             sl = self.sampleh.getStringListNew()
         return sl
+    
+    def updateTheme(self, is_dark: bool) -> None:
+        """Update colours for dark/light mode.
+
+        Uses explicit palettes so that changes are clearly visible
+        regardless of platform system-colour behaviour.
+        """
+        self.is_dark = is_dark
+
+        # Update fit colours to match theme
+        if self.is_dark:
+            self.fit_colour = (204, 96, 0)
+            self.const_fit_colour = (78, 121, 167)
+        else:
+            self.fit_colour = (245, 121, 0)
+            self.const_fit_colour = (114, 159, 207)
+
+        # Propagate theme into SampleHandler so its HTML colours
+        # (standard/stack lines) follow the current mode.
+        if hasattr(self, "sampleh") and hasattr(self.sampleh, "set_theme"):
+            self.sampleh.set_theme(is_dark)
+
+        if is_dark:
+            bg = wx.Colour(30, 30, 30)
+            fg = wx.Colour(230, 230, 230)
+        else:
+            bg = wx.Colour(255, 255, 255)
+            fg = wx.Colour(0, 0, 0)
+
+        self.SetBackgroundColour(bg)
+        self.SetForegroundColour(fg)
+
+        self.toolbar.SetBackgroundColour(bg)
+        self.toolbar.SetForegroundColour(fg)
+
+        self.listbox.SetBackgroundColour(bg)
+        self.listbox.SetForegroundColour(fg)
+        self.listbox.Refresh()
+
+        # Rebuild list contents so HTML uses the new base text colour
+        try:
+            self.Update(update_script=False)
+        except Exception:
+            pass
+
+        self.Refresh()
 
 
 class DataParameterPanel(wx.Panel):
@@ -1162,6 +1224,8 @@ class DataParameterPanel(wx.Panel):
     def __init__(self, parent, plugin):
         wx.Panel.__init__(self, parent)
         self.plugin = plugin
+        # Track current theme; default to main window's state if available
+        self.is_dark = getattr(self.plugin.parent, "is_dark", False)
         boxver = wx.BoxSizer(wx.VERTICAL)
         # Indention for a command - used to separate commands and data
         self.command_indent = "<pre>   "
@@ -1178,6 +1242,9 @@ class DataParameterPanel(wx.Panel):
         boxver.Add(self.listbox, 1, wx.EXPAND)
 
         self.SetSizer(boxver)
+
+        # Apply initial theme
+        self.updateTheme(self.is_dark)
 
     def do_toolbar(self):
         dpi_scale_factor = wx.GetApp().dpi_scale_factor
@@ -1313,20 +1380,56 @@ class DataParameterPanel(wx.Panel):
             self.script_update_func(None)
         self.Refresh()
 
+    def updateTheme(self, is_dark: bool) -> None:
+        """Update colours for dark/light mode on the Simulations tab."""
+        self.is_dark = is_dark
+
+        if is_dark:
+            bg = wx.Colour(30, 30, 30)
+            fg = wx.Colour(230, 230, 230)
+        else:
+            bg = wx.Colour(255, 255, 255)
+            fg = wx.Colour(0, 0, 0)
+
+        self.SetBackgroundColour(bg)
+        self.SetForegroundColour(fg)
+
+        self.toolbar.SetBackgroundColour(bg)
+        self.toolbar.SetForegroundColour(fg)
+
+        self.listbox.SetBackgroundColour(bg)
+        self.listbox.SetForegroundColour(fg)
+        self.listbox.Refresh()
+
+        # Rebuild list contents so HTML uses the new base text colour
+        try:
+            self.update_listbox()
+        except Exception:
+            pass
+
+        self.Refresh()
+
     def update_listbox(self):
         """update_listbox(self) --> None
 
         updates the listbox.
         """
         list_strings = []
+        base_color = "rgb(230,230,230)" if self.is_dark else "rgb(0,0,0)"
         for i in range(len(self.datalist)):
             str_arg = ", ".join(self.args[i])
-            list_strings.append(
-                "<code><b>%s</b>: %s(%s, %s)</code>"
-                " \n" % (self.datalist[i], self.sim_funcs[i], str_arg, self.insts[i])
+            header_html = "<code><b>%s</b>: %s(%s, %s)</code> \n" % (
+                self.datalist[i],
+                self.sim_funcs[i],
+                str_arg,
+                self.insts[i],
             )
+            header_html = '<font color="%s">%s</font>' % (base_color, header_html)
+            list_strings.append(header_html)
             for item in self.expressionlist[i]:
-                list_strings.append(self.command_indent + "%s</pre>" % item)
+                expr_html = self.command_indent + "%s</pre>" % item
+                expr_html = '<font color="%s">%s</font>' % (base_color, expr_html)
+                list_strings.append(expr_html)
 
         self.listbox.SetItemList(list_strings)
 

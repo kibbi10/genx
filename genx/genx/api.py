@@ -52,6 +52,9 @@ def fit_notebook(model, optimizer):
     optimizer.start_fit(model)
     from time import sleep
 
+    from .core.mpl_config import apply_genx_mpl_style
+    apply_genx_mpl_style()
+
     import matplotlib.pyplot as plt
 
     from IPython.display import clear_output, display
@@ -178,6 +181,9 @@ def fit(model, optimizer):
     optimizer.text_output = print
     optimizer.start_fit(model)
     try:
+        from .core.mpl_config import apply_genx_mpl_style
+        apply_genx_mpl_style()
+
         import matplotlib.pyplot as plt
     except ImportError:
         plot_result = False
